@@ -6,10 +6,10 @@ import 'package:telegramflutter/pages/chat_detail_page.dart';
 import 'package:telegramflutter/theme/colors.dart';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({Key? key}) : super(key: key);
+  const ChatPage({super.key});
 
   @override
-  _ChatPageState createState() => _ChatPageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> {
@@ -29,18 +29,18 @@ class _ChatPageState extends State<ChatPage> {
     return AppBar(
       elevation: 0,
       backgroundColor: greyColor,
-      title: Text(
-        "Chats",
+      title: const Text(
+        'Chats',
         style: TextStyle(
           fontSize: 20,
           color: white,
           fontWeight: FontWeight.w500,
         ),
       ),
-      leading: IconButton(
-        onPressed: null,
-        icon: Text(
-          "Edit",
+      leading: TextButton(
+        onPressed: () {},
+        child: const Text(
+          'Edit',
           style: TextStyle(
             fontSize: 16,
             color: primary,
@@ -49,7 +49,10 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
       actions: [
-        IconButton(onPressed: null, icon: Icon(LineIcons.edit, color: primary)),
+        IconButton(
+          onPressed: () {},
+          icon: const Icon(LineIcons.edit, color: primary),
+        ),
       ],
     );
   }
@@ -60,40 +63,35 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           Container(
             height: 68,
-            decoration: BoxDecoration(color: greyColor),
+            decoration: const BoxDecoration(color: greyColor),
             child: Padding(
               padding: const EdgeInsets.all(15),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: bgColor,
-                      borderRadius: BorderRadius.circular(10),
+              child: Container(
+                height: 38,
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: TextField(
+                  style: const TextStyle(color: white),
+                  cursorColor: primary,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    prefixIcon: Icon(
+                      LineIcons.search,
+                      color: white.withOpacity(0.3),
                     ),
-                    child: TextField(
-                      style: TextStyle(color: white),
-                      cursorColor: primary,
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        prefixIcon: Icon(
-                          LineIcons.search,
-                          color: white.withOpacity(0.3),
-                        ),
-                        hintText: "Search for messages or users",
-                        hintStyle: TextStyle(
-                          color: white.withOpacity(0.3),
-                          fontSize: 17,
-                        ),
-                      ),
+                    hintText: 'Search for messages or users',
+                    hintStyle: TextStyle(
+                      color: white.withOpacity(0.3),
+                      fontSize: 17,
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
-          SizedBox(height: 20),
+          const SizedBox(height: 20),
           getListChats(),
         ],
       ),

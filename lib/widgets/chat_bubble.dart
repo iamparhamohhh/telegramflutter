@@ -9,12 +9,12 @@ class CustomBubbleChat extends StatelessWidget {
   final bool isLast;
 
   const CustomBubbleChat({
-    Key? key,
+    super.key,
     required this.isMe,
     required this.message,
     required this.time,
     required this.isLast,
-  }) : super(key: key);
+  });
   @override
   Widget build(BuildContext context) {
     if (isMe) {
@@ -31,20 +31,15 @@ class CustomBubbleChat extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.only(
-                      left: 8,
-                      right: 8,
-                      top: 5,
-                      bottom: 5,
-                    ),
+                    padding: const EdgeInsets.all(8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
                           message,
-                          style: TextStyle(fontSize: 16, color: white),
+                          style: const TextStyle(fontSize: 16, color: white),
                         ),
-                        SizedBox(height: 3),
+                        const SizedBox(height: 3),
                         Text(
                           time,
                           style: TextStyle(

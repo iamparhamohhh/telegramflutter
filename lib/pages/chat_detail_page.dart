@@ -8,11 +8,11 @@ import 'package:telegramflutter/widgets/chat_bubble.dart';
 class ChatDetailPage extends StatefulWidget {
   final String name;
   final String img;
-  const ChatDetailPage({Key? key, required this.name, required this.img})
-    : super(key: key);
+
+  const ChatDetailPage({super.key, required this.name, required this.img});
 
   @override
-  _ChatDetailPageState createState() => _ChatDetailPageState();
+  State<ChatDetailPage> createState() => _ChatDetailPageState();
 }
 
 class _ChatDetailPageState extends State<ChatDetailPage> {
@@ -33,34 +33,23 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     return AppBar(
       elevation: 0,
       backgroundColor: greyColor,
-      title: Container(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    widget.name,
-                    style: TextStyle(
-                      fontSize: 17,
-                      color: white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    "last seen recently",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: white.withOpacity(0.4),
-                    ),
-                  ),
-                ],
-              ),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            widget.name,
+            style: const TextStyle(
+              fontSize: 17,
+              color: white,
+              fontWeight: FontWeight.bold,
             ),
-          ],
-        ),
+          ),
+          Text(
+            'last seen recently',
+            style: TextStyle(fontSize: 12, color: white.withOpacity(0.4)),
+          ),
+        ],
       ),
       leading: IconButton(
         onPressed: () {

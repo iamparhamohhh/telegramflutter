@@ -6,14 +6,14 @@ import 'package:telegramflutter/pages/setting_page.dart';
 import 'package:telegramflutter/theme/colors.dart';
 
 class RootApp extends StatefulWidget {
-  const RootApp({Key? key}) : super(key: key);
+  const RootApp({super.key});
 
   @override
-  _RootAppState createState() => _RootAppState();
+  State<RootApp> createState() => _RootAppState();
 }
 
 class _RootAppState extends State<RootApp> {
-  int pageIndex = 0;
+  int _pageIndex = 0;
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -25,60 +25,61 @@ class _RootAppState extends State<RootApp> {
 
   Widget getBody() {
     return IndexedStack(
-      index: pageIndex,
-      children: [ContactPage(), ChatPage(), SettingPage()],
+      index: _pageIndex,
+      children: const [ContactPage(), ChatPage(), SettingPage()],
     );
   }
 
   Widget getFooter() {
-    List iconsItems = [Icons.account_circle, Icons.chat_bubble, Icons.settings];
-    List textItems = ["Contacts", "Chats", "Settings"];
+    const List<IconData> iconItems = [
+      Icons.account_circle,
+      Icons.chat_bubble,
+      Icons.settings,
+    ];
+    const List<String> textItems = ['Contacts', 'Chats', 'Settings'];
+
     return Container(
       height: 90,
       width: double.infinity,
-      decoration: BoxDecoration(color: greyColor),
+      decoration: const BoxDecoration(color: greyColor),
       child: Padding(
         padding: const EdgeInsets.only(top: 5),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(iconsItems.length, (index) {
+          children: List.generate(iconItems.length, (index) {
+            final bool isSelected = _pageIndex == index;
             return GestureDetector(
               onTap: () {
                 setState(() {
-                  pageIndex = index;
+                  _pageIndex = index;
                 });
               },
               child: Column(
                 children: [
-                  index == 1
-                      ? badges.Badge(
-                          badgeContent: Text(
-                            "3",
-                            style: TextStyle(color: white),
-                          ),
-                          child: Icon(
-                            iconsItems[index],
-                            size: 30,
-                            color: pageIndex == index
-                                ? primary
-                                : white.withOpacity(0.5),
-                          ),
-                        )
-                      : Icon(
-                          iconsItems[index],
-                          size: 30,
-                          color: pageIndex == index
-                              ? primary
-                              : white.withOpacity(0.5),
-                        ),
-                  SizedBox(height: 3),
+                  if (index == 1)
+                    badges.Badge(
+                      badgeContent: const Text(
+                        '3',
+                        style: TextStyle(color: white),
+                      ),
+                      child: Icon(
+                        iconItems[index],
+                        size: 30,
+                        color: isSelected ? primary : white.withOpacity(0.5),
+                      ),
+                    )
+                  else
+                    Icon(
+                      iconItems[index],
+                      size: 30,
+                      color: isSelected ? primary : white.withOpacity(0.5),
+                    ),
+                  const SizedBox(height: 3),
                   Text(
                     textItems[index],
                     style: TextStyle(
                       fontSize: 11,
-                      color: pageIndex == index
-                          ? primary
-                          : white.withOpacity(0.5),
+                      color: isSelected ? primary : white.withOpacity(0.5),
                     ),
                   ),
                 ],
