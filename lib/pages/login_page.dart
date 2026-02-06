@@ -27,9 +27,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       await _telegramService.initialize();
-      print('✓ TelegramService initialized');
     } catch (e) {
-      print('✗ Failed to initialize TelegramService: $e');
       _showError('Failed to initialize: $e');
       setState(() => _isLoading = false);
       return;
@@ -39,18 +37,13 @@ class _LoginPageState extends State<LoginPage> {
       (state) {
         if (!mounted) return;
 
-        print('Auth state in UI: $state');
-
         if (state == 'WaitingForPhone') {
           setState(() => _isLoading = false);
-          print('✓ Ready for phone number input');
         } else if (state == 'WaitingForCode') {
           _showCodeDialog();
         } else if (state == 'WaitingForPassword') {
           _showPasswordDialog();
         } else if (state == 'Authorized') {
-          print('✓ Authorized! Preloading chats and navigating to home...');
-
           // Preload chats before navigating
           _telegramService.loadChats(limit: 100);
 
@@ -68,7 +61,6 @@ class _LoginPageState extends State<LoginPage> {
         }
       },
       onError: (error) {
-        print('Auth stream error: $error');
         _showError(error.toString());
         setState(() => _isLoading = false);
       },
@@ -175,13 +167,8 @@ class _LoginPageState extends State<LoginPage> {
                       setDialogState(() => isSubmitting = true);
 
                       try {
-                        print('Submitting verification code: $code');
                         await _telegramService.checkAuthenticationCode(code);
-                        print(
-                          'Code submitted, waiting for auth state change...',
-                        );
                       } catch (e) {
-                        print('Code submission error: $e');
                         setDialogState(() => isSubmitting = false);
                         _showError(e.toString());
                       }
@@ -286,13 +273,8 @@ class _LoginPageState extends State<LoginPage> {
                       setDialogState(() => isSubmitting = true);
 
                       try {
-                        print('Submitting password...');
                         await _telegramService.checkPassword(password);
-                        print(
-                          'Password submitted, waiting for auth state change...',
-                        );
                       } catch (e) {
-                        print('Password submission error: $e');
                         setDialogState(() => isSubmitting = false);
                         _showError(e.toString());
                       }
@@ -316,7 +298,6 @@ class _LoginPageState extends State<LoginPage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    print('Showing error: $message');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );

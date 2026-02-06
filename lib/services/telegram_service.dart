@@ -84,6 +84,17 @@ class TelegramService {
   final _chatsController = StreamController<List<TelegramChat>>.broadcast();
   Stream<List<TelegramChat>> get chatsStream => _chatsController.stream;
 
+  // Debounce timer for emitting chats
+  Timer? _emitChatsDebounceTimer;
+  static const _emitChatsDebounceMs = 100; // Debounce by 100ms
+
+  // Debug mode - set to false for production
+  static const bool _debugMode = false;
+
+  void _debugPrint(String message) {
+    if (_debugMode) print(message);
+  }
+
   // Stream for messages updates (per chat)
   final Map<int, StreamController<List<TelegramMessage>>> _messageControllers =
       {};
@@ -107,8 +118,8 @@ class TelegramService {
 
   // Message cache per chat
   final Map<int, List<TelegramMessage>> _messagesCache = {};
-  final Map<int, Map<String, dynamic>> _rawMessagesCache =
-      {}; // messageId -> raw JSON
+  //final Map<int, Map<String, dynamic>> _rawMessagesCache =
+  //    {}; // messageId -> raw JSON
 
   // Track current user ID
   int? _currentUserId;
@@ -128,7 +139,7 @@ class TelegramService {
 
   /// Clears the TDLib database to start fresh. Call this if TDLib is stuck.
   Future<void> clearDatabase() async {
-    print('Clearing TDLib database...');
+    _debugPrint('Clearing TDLib database...');
 
     // Stop the current client if running
     _isRunning = false;
@@ -141,7 +152,7 @@ class TelegramService {
         // Wait for close to complete
         await Future.delayed(const Duration(milliseconds: 500));
       } catch (e) {
-        print('Error closing client: $e');
+        _debugPrint('Error closing client: $e');
       }
       _clientId = 0;
     }
@@ -152,7 +163,6 @@ class TelegramService {
       final dbDir = Directory(_databasePath!);
       if (await dbDir.exists()) {
         await dbDir.delete(recursive: true);
-        print('Database directory deleted: $_databasePath');
       }
     } else {
       final appDocDir = await getApplicationDocumentsDirectory();
@@ -160,16 +170,14 @@ class TelegramService {
       final dbDir = Directory(dbPath);
       if (await dbDir.exists()) {
         await dbDir.delete(recursive: true);
-        print('Database directory deleted: $dbPath');
       }
     }
     _databasePath = null;
-    print('TDLib database cleared. Restart the app to reinitialize.');
   }
 
   Future<void> initialize() async {
     if (_clientId != 0) {
-      print('TelegramService already initialized with client ID: $_clientId');
+      _debugPrint('TelegramService already initialized');
       return;
     }
 
@@ -178,7 +186,6 @@ class TelegramService {
       if (_databasePath == null) {
         final appDocDir = await getApplicationDocumentsDirectory();
         _databasePath = '${appDocDir.path}/tdlib';
-        print('Database path: $_databasePath');
 
         final databaseDir = Directory(_databasePath!);
         if (!await databaseDir.exists()) {
@@ -188,8 +195,6 @@ class TelegramService {
 
       // Initialize the TDLib native library first (required for FFI)
       if (!_libraryInitialized) {
-        print('Initializing TDLib native library...');
-
         // On Android, we need to load the library by name (it will be found in the native lib path)
         // The library is named "libtdjson.so" but we load it as "tdjson"
         if (Platform.isAndroid) {
@@ -205,14 +210,11 @@ class TelegramService {
         }
 
         _libraryInitialized = true;
-        print('TDLib native library initialized');
       }
 
       // Create TDLib client
       _clientId = tdCreate();
-      print('══════════════════════════════════════════');
-      print('TDLib client created with ID: $_clientId');
-      print('══════════════════════════════════════════');
+      _debugPrint('TDLib client created: $_clientId');
 
       if (_clientId == 0) {
         throw Exception('Failed to create TDLib client');
@@ -229,12 +231,9 @@ class TelegramService {
 
       // Send GetAuthorizationState to "wake up" the TDLib client
       // This triggers TDLib to initialize and start sending updates
-      print('Sending GetAuthorizationState to activate TDLib...');
       tdSend(_clientId, const GetAuthorizationState());
-      print('GetAuthorizationState sent');
     } catch (e, stack) {
-      print('TDLib initialization error: $e');
-      print('Stack: $stack');
+      _debugPrint('TDLib initialization error: $e');
       _authStateController.addError(e);
       rethrow;
     }
@@ -243,7 +242,6 @@ class TelegramService {
   Timer? _receiveTimer;
 
   void _startReceivingUpdates() {
-    print('Starting update receive loop (Timer-based)...');
     _updateCount = 0;
     _nullCount = 0;
 
@@ -272,9 +270,10 @@ class TelegramService {
 
       if (jsonString == null || jsonString.isEmpty) {
         _nullCount++;
-        if (_nullCount <= 10 || _nullCount % 100 == 0) {
-          print(
-            '... waiting for updates ($_nullCount polls, $_updateCount updates, ${_chatsCache.length} chats cached)',
+        // Only log occasionally in debug mode
+        if (_debugMode && (_nullCount <= 3 || _nullCount % 500 == 0)) {
+          _debugPrint(
+            'Waiting... ($_nullCount polls, ${_chatsCache.length} chats)',
           );
         }
         return;
@@ -287,9 +286,6 @@ class TelegramService {
       try {
         update = convertToObject(jsonString);
       } catch (parseError, parseStack) {
-        // Log the parsing error and extract what we can from raw JSON
-        print('TDLib parse error (will try manual extraction): $parseError');
-
         // Try to extract useful info from raw JSON even if full parsing fails
         _handleRawJson(jsonString);
 
@@ -312,8 +308,7 @@ class TelegramService {
     } catch (e, stack) {
       // TDLib JSON parsing errors can happen due to API version mismatches
       // Log the error but continue receiving updates
-      print('TDLib receive error: $e');
-      print('Stack: $stack');
+      _debugPrint('TDLib receive error: $e');
       // Continue polling for the next update
       Future.microtask(() {
         if (_isRunning) _pollUpdates();
@@ -327,17 +322,13 @@ class TelegramService {
       final json = jsonDecode(jsonString) as Map<String, dynamic>;
       final type = json['@type'] as String?;
 
-      print('Raw JSON type: $type');
-
       // Handle updateNewChat manually if parsing failed
       if (type == 'updateNewChat') {
         final chatJson = json['chat'] as Map<String, dynamic>?;
         if (chatJson != null) {
           final chatId = chatJson['id'] as int?;
           final title = chatJson['title'] as String? ?? 'Unknown';
-          print('═══════════════════════════════════════════════════');
-          print('RAW: New chat received: $title (ID: $chatId)');
-          print('═══════════════════════════════════════════════════');
+          _debugPrint('RAW: New chat: $title (ID: $chatId)');
 
           if (chatId != null) {
             // Create a minimal Chat object manually without using fromJson
@@ -347,7 +338,7 @@ class TelegramService {
         }
       } else if (type == 'chats') {
         final chatIds = (json['chat_ids'] as List?)?.cast<int>() ?? [];
-        print('RAW: Received ${chatIds.length} chat IDs: $chatIds');
+        _debugPrint('RAW: ${chatIds.length} chat IDs received');
         _chatIds = chatIds;
         _emitChats();
       } else if (type == 'updateChatLastMessage') {
@@ -356,8 +347,6 @@ class TelegramService {
         if (chatId != null &&
             (_chatsCache.containsKey(chatId) ||
                 _rawChatData.containsKey(chatId))) {
-          print('RAW: Updating last message for chat $chatId');
-          // Update the cached chat's last message info
           _updateChatLastMessageFromRaw(chatId, lastMessageJson);
           _emitChats();
         }
@@ -367,17 +356,12 @@ class TelegramService {
         if (msgJson != null) {
           final chatId = msgJson['chat_id'] as int?;
           if (chatId != null) {
-            print('RAW: New message in chat $chatId');
             _handleRawNewMessage(chatId, msgJson);
           }
         }
       } else if (type == 'messages') {
         // Response to getChatHistory
         final messagesJson = json['messages'] as List?;
-        final totalCount = json['total_count'] as int? ?? 0;
-        print(
-          'RAW: Received $totalCount messages (${messagesJson?.length ?? 0} in batch)',
-        );
         if (messagesJson != null && messagesJson.isNotEmpty) {
           final firstMsg = messagesJson.first as Map<String, dynamic>;
           final chatId = firstMsg['chat_id'] as int?;
@@ -392,7 +376,6 @@ class TelegramService {
         // Single message response (e.g., after sending)
         final chatId = json['chat_id'] as int?;
         if (chatId != null) {
-          print('RAW: Message response for chat $chatId');
           _handleRawNewMessage(chatId, json);
         }
       } else if (type == 'updateMessageSendSucceeded') {
@@ -402,9 +385,6 @@ class TelegramService {
         if (msgJson != null) {
           final chatId = msgJson['chat_id'] as int?;
           if (chatId != null) {
-            print(
-              'RAW: Message send succeeded for chat $chatId (old id: $oldMsgId)',
-            );
             _handleMessageSendSucceeded(chatId, msgJson, oldMsgId);
           }
         }
@@ -415,7 +395,6 @@ class TelegramService {
         if (msgJson != null) {
           final chatId = msgJson['chat_id'] as int?;
           if (chatId != null) {
-            print('RAW: Message send failed for chat $chatId');
             _handleMessageSendFailed(chatId, oldMsgId);
           }
         }
@@ -425,7 +404,6 @@ class TelegramService {
         final isMe = json['is_me'] as bool? ?? false;
         if (isMe && userId != null) {
           _currentUserId = userId;
-          print('RAW: Current user ID: $_currentUserId');
         }
       } else if (type == 'updateFile') {
         // File download progress from raw JSON
@@ -441,19 +419,13 @@ class TelegramService {
         final userId = json['user_id'] as int?;
         if (userId != null) {
           _userFullInfoCache[userId] = json;
-          print('RAW: Cached full info for user $userId');
         }
       } else if (type == 'updateUserStatus') {
-        // User status changed
-        final userId = json['user_id'] as int?;
-        if (userId != null) {
-          print('RAW: User $userId status updated');
-          _emitChats(); // Refresh to show new status
-        }
+        // User status changed - don't emit chats for every status update
+        // The status will be shown when user opens the chat
       } else if (type == 'chats' && json['chat_ids'] != null) {
         // Search results
         final chatIds = (json['chat_ids'] as List?)?.cast<int>() ?? [];
-        print('RAW: Search results - ${chatIds.length} chats');
         final results = <TelegramChat>[];
         for (final id in chatIds) {
           if (_chatsCache.containsKey(id)) {
@@ -462,30 +434,42 @@ class TelegramService {
             results.add(_convertRawToTelegramChat(id, _rawChatData[id]!, null));
           }
         }
-        _searchResultsController.add(results);
+        _chatSearchResultsController.add(results);
       } else if (type == 'foundMessages') {
-        // Search messages results
+        // Global search messages results
         final messagesJson = json['messages'] as List?;
-        print('RAW: Found ${messagesJson?.length ?? 0} messages');
-        if (messagesJson != null && messagesJson.isNotEmpty) {
-          final firstMsg = messagesJson.first as Map<String, dynamic>;
-          final chatId = firstMsg['chat_id'] as int?;
-          if (chatId != null) {
-            _handleRawMessages(
-              chatId,
-              messagesJson.cast<Map<String, dynamic>>(),
-            );
-          }
+        final totalCount = json['total_count'] as int? ?? 0;
+        final nextOffset = json['next_offset'] as String?;
+        if (messagesJson != null) {
+          _handleRawFoundMessages(
+            messagesJson.cast<Map<String, dynamic>>(),
+            totalCount,
+            nextOffset,
+          );
+        }
+      } else if (type == 'foundChatMessages') {
+        // Chat-specific search results
+        final messagesJson = json['messages'] as List?;
+        final totalCount = json['total_count'] as int? ?? 0;
+        final nextFromMessageId = json['next_from_message_id'] as int? ?? 0;
+        final chatId = messagesJson?.isNotEmpty == true
+            ? (messagesJson!.first as Map<String, dynamic>)['chat_id'] as int?
+            : null;
+        if (messagesJson != null && chatId != null) {
+          _handleRawFoundChatMessages(
+            chatId,
+            messagesJson.cast<Map<String, dynamic>>(),
+            totalCount,
+            nextFromMessageId,
+          );
         }
       } else if (type == 'storageStatistics') {
         // Storage statistics response
         _storageStatistics = json;
-        print('RAW: Got storage statistics');
       } else if (type == 'user' && json['is_me'] == true) {
         // Current user info
         _currentUserInfo = json;
         _currentUserId = json['id'] as int?;
-        print('RAW: Got current user info: ${json['first_name']}');
       } else if (type == 'updateMessageContent') {
         // Message was edited
         final chatId = json['chat_id'] as int?;
@@ -503,34 +487,28 @@ class TelegramService {
           _handleReadOutbox(chatId, lastReadOutboxMessageId);
         }
       } else if (type == 'ok') {
-        print('RAW: Operation succeeded');
+        // Success - no need to log
       } else if (type == 'error') {
         final code = json['code'] as int?;
         final message = json['message'] as String?;
-        print('RAW: Error $code: $message');
+        _debugPrint('TDLib error $code: $message');
       }
     } catch (e, stack) {
-      print('Could not handle raw JSON: $e');
-      print('Stack: $stack');
+      _debugPrint('Raw JSON error: $e');
     }
   }
 
   /// Cache a chat from raw JSON data without using TDLib's broken fromJson
   void _cacheRawChat(int chatId, Map<String, dynamic> chatJson) {
     // Check if we already have this chat cached (either in proper cache or raw cache)
-    if (_chatsCache.containsKey(chatId)) {
-      print('Chat $chatId already in proper cache');
-      return;
-    }
-    if (_rawChatData.containsKey(chatId)) {
-      print('Chat $chatId already in raw cache');
+    if (_chatsCache.containsKey(chatId) || _rawChatData.containsKey(chatId)) {
       return;
     }
 
     // We can't create a Chat object directly without TDLib's broken parsing,
     // so we'll store the raw data and create TelegramChat objects directly
     _rawChatData[chatId] = chatJson;
-    print(
+    _debugPrint(
       'Cached raw chat data for $chatId (raw cache size: ${_rawChatData.length})',
     );
   }
@@ -549,13 +527,14 @@ class TelegramService {
   final Map<int, Map<String, dynamic>> _rawLastMessageData = {};
 
   void _handleUpdate(TdObject update) {
-    // Only log important updates, not all of them
-    if (update is UpdateNewChat ||
-        update is UpdateAuthorizationState ||
-        update is Chats ||
-        update is Chat ||
-        update is TdError) {
-      print('TDLib update: ${update.runtimeType}');
+    // Only log important updates in debug mode
+    if (_debugMode &&
+        (update is UpdateNewChat ||
+            update is UpdateAuthorizationState ||
+            update is Chats ||
+            update is Chat ||
+            update is TdError)) {
+      _debugPrint('TDLib update: ${update.runtimeType}');
     }
 
     if (update is UpdateAuthorizationState) {
@@ -566,32 +545,67 @@ class TelegramService {
     } else if (update is UpdateNewChat) {
       // A new chat was received
       _chatsCache[update.chat.id] = update.chat;
-      print('════════════════════════════════════════');
-      print('NEW CHAT RECEIVED: ${update.chat.title}');
-      print('Chat ID: ${update.chat.id}');
-      print('Total chats in cache: ${_chatsCache.length}');
-      print('════════════════════════════════════════');
+      _debugPrint(
+        'New chat: ${update.chat.title} (${_chatsCache.length} total)',
+      );
       _emitChats();
     } else if (update is UpdateChatLastMessage) {
-      // Chat's last message was updated - just emit the chats, TDLib manages the cache
-      print('Chat last message updated for chat ${update.chatId}');
+      // Chat's last message was updated
+      if (update.lastMessage != null) {
+        final chat = _chatsCache[update.chatId];
+        if (chat != null) {
+          // Update positions if provided
+          for (final pos in update.positions) {
+            // TDLib handles position updates internally
+          }
+        }
+      }
       _emitChats();
     } else if (update is UpdateChatPosition) {
-      // Chat position in the list was updated
-      print('Chat position updated');
+      // Chat position in the list was updated - handled by TDLib cache
       _emitChats();
     } else if (update is UpdateChatReadInbox) {
       // Chat unread count was updated
-      print('Chat read inbox updated for chat ${update.chatId}');
       _emitChats();
     } else if (update is UpdateUser) {
-      // User info was updated
+      // User info was updated - don't emit chats for every user update
       _usersCache[update.user.id] = update.user;
-      _emitChats();
+      // Only emit if this affects visible chats (debounced anyway)
     } else if (update is UpdateBasicGroup) {
       _basicGroupsCache[update.basicGroup.id] = update.basicGroup;
     } else if (update is UpdateSupergroup) {
       _supergroupsCache[update.supergroup.id] = update.supergroup;
+    } else if (update is UpdateChatFolders) {
+      // Chat folders updated
+      _debugPrint('Chat folders updated: ${update.chatFolders.length} folders');
+      _chatFolders.clear();
+      for (final folderInfo in update.chatFolders) {
+        _chatFolders.add(TelegramChatFolder.fromInfo(folderInfo));
+      }
+      _chatFoldersController.add(_chatFolders);
+    } else if (update is ChatFolder) {
+      // Response to GetChatFolder - detailed folder info
+      _debugPrint('Received chat folder details: ${update.title}');
+    } else if (update is Users) {
+      // Response to GetContacts
+      _debugPrint('Received ${update.userIds.length} contacts');
+      _contacts.clear();
+      for (final userId in update.userIds) {
+        final user = _usersCache[userId];
+        if (user != null) {
+          _contacts.add(
+            TelegramContact(
+              id: user.id,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              phone: user.phoneNumber,
+              username: user.usernames?.activeUsernames.firstOrNull,
+              photoUrl: null,
+            ),
+          );
+        }
+      }
+      _contactsController.add(_contacts);
     } else if (update is UpdateFile) {
       // File download progress
       _filesCache[update.file.id] = update.file;
@@ -602,56 +616,43 @@ class TelegramService {
     } else if (update is Chats) {
       // Response to GetChats - contains list of chat IDs
       _chatIds = update.chatIds;
-      print('══════════════════════════════════════════');
-      print('Received ${_chatIds.length} chat IDs from GetChats');
-      print('Chat IDs: $_chatIds');
-      print('══════════════════════════════════════════');
+      _debugPrint('Received ${_chatIds.length} chat IDs');
 
       // Request details for each chat that we don't have yet
       for (final chatId in _chatIds) {
         if (!_chatsCache.containsKey(chatId)) {
-          print('Requesting chat details for: $chatId');
           tdSend(_clientId, GetChat(chatId: chatId));
         }
       }
       _emitChats();
     } else if (update is Chat) {
       // Response to GetChat - full chat details
-      print('Received chat details: ${update.title} (ID: ${update.id})');
       _chatsCache[update.id] = update;
       _emitChats();
     } else if (update is TdError) {
-      print('TDLib TdError: ${update.code} - ${update.message}');
-      // If TDLib reports binlog/file lock problems, surface actionable message
+      _debugPrint('TDLib Error: ${update.code} - ${update.message}');
       final msg = update.message;
       if (update.code == 400 && msg.contains('Can\'t lock file')) {
-        print('⚠ Detected binlog lock issue; suggesting database reset');
         _authStateController.addError(Exception(msg));
-        // Do not attempt aggressive auto-restart here; inform UI and allow user to reset.
         return;
       }
-
       _authStateController.addError(Exception(msg));
     } else if (update is Ok) {
-      print('TDLib OK response received');
-      // Ok response means the last command was successful, auth state will follow
+      // Ok response means the last command was successful
     } else {
-      // Log any other update types for debugging
-      print('Other TDLib update: ${update.runtimeType}');
+      // Silently ignore other updates in production
     }
   }
 
   Future<void> _handleAuthorizationState(AuthorizationState state) async {
-    print('=== Auth state received: ${state.runtimeType} ===');
+    _debugPrint('Auth state: ${state.runtimeType}');
 
     if (state is AuthorizationStateWaitTdlibParameters) {
       if (_parametersSet) {
-        print('Parameters already sent, skipping...');
         return;
       }
 
       if (_databasePath == null) {
-        print('Error: Database path not set!');
         _authStateController.addError(
           Exception('Database path not initialized'),
         );
@@ -659,10 +660,8 @@ class TelegramService {
       }
 
       try {
-        print('Sending TdlibParameters with database: $_databasePath');
-        print('API ID: $apiId');
-
-        _parametersSet = true; // Mark as sent before sending
+        _debugPrint('Sending TdlibParameters');
+        _parametersSet = true;
 
         tdSend(
           _clientId,
@@ -687,26 +686,26 @@ class TelegramService {
             ignoreFileNames: false,
           ),
         );
-        print('✓ TdlibParameters sent successfully!');
+        _debugPrint('✓ TdlibParameters sent successfully!');
       } catch (e, stackTrace) {
-        print('Error setting TDLib parameters: $e');
-        print('Stack trace: $stackTrace');
+        _debugPrint('Error setting TDLib parameters: $e');
+        _debugPrint('Stack trace: $stackTrace');
         _authStateController.addError(e);
       }
     } else if (state is AuthorizationStateWaitPhoneNumber) {
-      print('✓ Ready for phone number input');
+      _debugPrint('✓ Ready for phone number input');
       _authStateController.add('WaitingForPhone');
     } else if (state is AuthorizationStateWaitCode) {
-      print('✓ Code verification required');
+      _debugPrint('✓ Code verification required');
       _authStateController.add('WaitingForCode');
     } else if (state is AuthorizationStateWaitPassword) {
-      print('✓ Password required');
+      _debugPrint('✓ Password required');
       _authStateController.add('WaitingForPassword');
     } else if (state is AuthorizationStateReady) {
-      print('✓ Authorization complete!');
+      _debugPrint('✓ Authorization complete!');
       _authStateController.add('Authorized');
     } else if (state is AuthorizationStateClosed) {
-      print('⚠ TDLib closed');
+      _debugPrint('⚠ TDLib closed');
       // Clean up internal state when TDLib reports closed
       _isRunning = false;
       _receiveTimer?.cancel();
@@ -722,7 +721,7 @@ class TelegramService {
       _clientId = 0;
       _authStateController.add('Closed');
     } else {
-      print('⚠ Unknown authorization state: ${state.runtimeType}');
+      _debugPrint('⚠ Unknown authorization state: ${state.runtimeType}');
     }
   }
 
@@ -768,10 +767,10 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('══════════════════════════════════════════');
-    print('Loading chats from Telegram (limit: $limit)...');
-    print('Current cache size: ${_chatsCache.length}');
-    print('══════════════════════════════════════════');
+    _debugPrint('══════════════════════════════════════════');
+    _debugPrint('Loading chats from Telegram (limit: $limit)...');
+    _debugPrint('Current cache size: ${_chatsCache.length}');
+    _debugPrint('══════════════════════════════════════════');
 
     // First, request to load chats - this triggers UpdateNewChat events
     tdSend(_clientId, LoadChats(chatList: const ChatListMain(), limit: limit));
@@ -782,7 +781,7 @@ class TelegramService {
 
   /// Get cached chats as TelegramChat objects
   List<TelegramChat> getChats() {
-    print(
+    _debugPrint(
       'Getting chats from cache. Cache size: ${_chatsCache.length}, Raw cache size: ${_rawChatData.length}',
     );
 
@@ -836,7 +835,7 @@ class TelegramService {
       chats.add(_convertRawToTelegramChat(chatId, rawChat, rawLastMsg));
     }
 
-    print(
+    _debugPrint(
       'Returning ${chats.length} chats (${_chatsCache.length} parsed, ${_rawChatData.length} raw)',
     );
     return chats;
@@ -853,7 +852,7 @@ class TelegramService {
     String lastMessage = '';
     String lastMessageTime = '';
     bool isSentByMe = false;
-    bool isRead = false;
+    //bool isRead = false;
     int unreadCount = 0;
 
     // Extract from raw chat JSON
@@ -963,7 +962,7 @@ class TelegramService {
           return 'Message';
       }
     } catch (e) {
-      print('Error in _getMessageTextFromRaw: $e');
+      _debugPrint('Error in _getMessageTextFromRaw: $e');
       return 'Message';
     }
   }
@@ -1157,7 +1156,7 @@ class TelegramService {
     );
 
     if (isCompleted && path != null) {
-      print('RAW: File $fileId download completed: $path');
+      _debugPrint('RAW: File $fileId download completed: $path');
     }
   }
 
@@ -1191,7 +1190,7 @@ class TelegramService {
       date: oldMessage.date,
     );
 
-    print('RAW: Updated message $messageId content in chat $chatId');
+    _debugPrint('RAW: Updated message $messageId content in chat $chatId');
     _emitMessages(chatId);
     _emitChats();
   }
@@ -1226,7 +1225,7 @@ class TelegramService {
     }
 
     if (updated) {
-      print(
+      _debugPrint(
         'RAW: Updated read status for messages in chat $chatId up to $lastReadOutboxMessageId',
       );
       _emitMessages(chatId);
@@ -1257,13 +1256,23 @@ class TelegramService {
     );
 
     if (local.isDownloadingCompleted) {
-      print('File ${file.id} download completed: ${local.path}');
+      _debugPrint('File ${file.id} download completed: ${local.path}');
     }
   }
 
+  /// Debounced emit chats to prevent excessive UI updates
   void _emitChats() {
+    _emitChatsDebounceTimer?.cancel();
+    _emitChatsDebounceTimer = Timer(
+      const Duration(milliseconds: _emitChatsDebounceMs),
+      _emitChatsNow,
+    );
+  }
+
+  /// Immediately emit chats (called after debounce)
+  void _emitChatsNow() {
     final chats = getChats();
-    print('Emitting ${chats.length} chats');
+    _debugPrint('Emitting ${chats.length} chats');
     _chatsController.add(chats);
   }
 
@@ -1281,7 +1290,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print(
+    _debugPrint(
       'Loading chat history for chat $chatId (limit: $limit, from: $fromMessageId)',
     );
 
@@ -1317,7 +1326,7 @@ class TelegramService {
       return;
     }
 
-    print(
+    _debugPrint(
       'Sending message to chat $chatId: "${text.substring(0, text.length.clamp(0, 50))}..."',
     );
 
@@ -1368,7 +1377,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending photo to chat $chatId: $filePath');
+    _debugPrint('Sending photo to chat $chatId: $filePath');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1427,7 +1436,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending video to chat $chatId: $filePath');
+    _debugPrint('Sending video to chat $chatId: $filePath');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1491,7 +1500,7 @@ class TelegramService {
     }
 
     final fileName = filePath.split('/').last.split('\\').last;
-    print('Sending document to chat $chatId: $fileName');
+    _debugPrint('Sending document to chat $chatId: $fileName');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1548,7 +1557,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending voice note to chat $chatId');
+    _debugPrint('Sending voice note to chat $chatId');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1606,7 +1615,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending location to chat $chatId: $latitude, $longitude');
+    _debugPrint('Sending location to chat $chatId: $latitude, $longitude');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1667,7 +1676,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending contact to chat $chatId: $firstName $phoneNumber');
+    _debugPrint('Sending contact to chat $chatId: $firstName $phoneNumber');
 
     // Create a temporary message
     final tempId = -DateTime.now().millisecondsSinceEpoch;
@@ -1726,7 +1735,7 @@ class TelegramService {
       throw Exception('TelegramService not initialized');
     }
 
-    print('Sending sticker to chat $chatId');
+    _debugPrint('Sending sticker to chat $chatId');
 
     tdSend(
       _clientId,
@@ -1753,7 +1762,7 @@ class TelegramService {
   Future<void> downloadMediaFile(int fileId, {int priority = 5}) async {
     if (_clientId == 0) return;
 
-    print('Starting download for file $fileId with priority $priority');
+    _debugPrint('Starting download for file $fileId with priority $priority');
 
     tdSend(
       _clientId,
@@ -1805,7 +1814,7 @@ class TelegramService {
       if (tempIndex != -1) {
         // Replace the temp message with the real one
         _messagesCache[chatId]![tempIndex] = message;
-        print('Replaced temp message with real message ${message.id}');
+        _debugPrint('Replaced temp message with real message ${message.id}');
         _emitMessages(chatId);
         _emitChats();
         return;
@@ -1815,7 +1824,7 @@ class TelegramService {
     if (existingIndex == -1) {
       // Insert at the beginning (newest first)
       _messagesCache[chatId]!.insert(0, message);
-      print(
+      _debugPrint(
         'Added new message to chat $chatId: ${message.text.substring(0, message.text.length.clamp(0, 30))}',
       );
     }
@@ -1850,7 +1859,9 @@ class TelegramService {
     // Sort messages by date (newest first for display)
     _messagesCache[chatId]!.sort((a, b) => b.date.compareTo(a.date));
 
-    print('Chat $chatId now has ${_messagesCache[chatId]!.length} messages');
+    _debugPrint(
+      'Chat $chatId now has ${_messagesCache[chatId]!.length} messages',
+    );
     _emitMessages(chatId);
   }
 
@@ -1875,7 +1886,7 @@ class TelegramService {
       if (tempIndex != -1) {
         _messagesCache[chatId]![tempIndex] = newMessage;
         replaced = true;
-        print(
+        _debugPrint(
           'Updated temp message $oldMsgId to real message ${newMessage.id}',
         );
       }
@@ -1889,7 +1900,7 @@ class TelegramService {
       if (tempIndex != -1) {
         _messagesCache[chatId]![tempIndex] = newMessage;
         replaced = true;
-        print(
+        _debugPrint(
           'Updated temp message (by text match) to real message ${newMessage.id}',
         );
       }
@@ -1937,10 +1948,133 @@ class TelegramService {
         contentType: failedMsg.contentType,
         date: failedMsg.date,
       );
-      print('Message send failed for chat $chatId');
+      _debugPrint('Message send failed for chat $chatId');
     }
 
     _emitMessages(chatId);
+  }
+
+  /// Handle global search results from raw JSON
+  void _handleRawFoundMessages(
+    List<Map<String, dynamic>> messagesJson,
+    int totalCount,
+    String? nextOffset,
+  ) {
+    final messages = <SearchResultMessage>[];
+
+    for (final msgJson in messagesJson) {
+      final converted = _convertRawToSearchResult(msgJson);
+      if (converted != null) {
+        messages.add(converted);
+      }
+    }
+
+    _lastSearchResults = SearchResults(
+      messages: messages,
+      totalCount: totalCount,
+      nextOffset: nextOffset,
+    );
+
+    _searchResultsController.add(_lastSearchResults!);
+    _debugPrint(
+      'Global search returned ${messages.length} messages (total: $totalCount)',
+    );
+  }
+
+  /// Handle chat-specific search results from raw JSON
+  void _handleRawFoundChatMessages(
+    int chatId,
+    List<Map<String, dynamic>> messagesJson,
+    int totalCount,
+    int nextFromMessageId,
+  ) {
+    final messages = <SearchResultMessage>[];
+
+    for (final msgJson in messagesJson) {
+      final converted = _convertRawToSearchResult(msgJson);
+      if (converted != null) {
+        messages.add(converted);
+      }
+    }
+
+    _lastSearchResults = SearchResults(
+      messages: messages,
+      totalCount: totalCount,
+      nextFromMessageId: nextFromMessageId,
+      chatId: chatId,
+    );
+
+    _searchResultsController.add(_lastSearchResults!);
+    _debugPrint(
+      'Chat search returned ${messages.length} messages in chat $chatId',
+    );
+  }
+
+  /// Convert raw JSON message to SearchResultMessage
+  SearchResultMessage? _convertRawToSearchResult(Map<String, dynamic> msgJson) {
+    try {
+      final id = msgJson['id'] as int?;
+      final chatId = msgJson['chat_id'] as int?;
+      final date = msgJson['date'] as int?;
+      final isOutgoing = msgJson['is_outgoing'] as bool? ?? false;
+
+      if (id == null || chatId == null || date == null) return null;
+
+      // Get sender info
+      int senderId = 0;
+      String senderName = '';
+      final senderJson = msgJson['sender_id'] as Map<String, dynamic>?;
+      if (senderJson != null) {
+        final senderType = senderJson['@type'] as String?;
+        if (senderType == 'messageSenderUser') {
+          senderId = senderJson['user_id'] as int? ?? 0;
+          final user = _usersCache[senderId];
+          if (user != null) {
+            senderName = _sanitizeString(
+              '${user.firstName} ${user.lastName}'.trim(),
+            );
+          }
+        } else if (senderType == 'messageSenderChat') {
+          senderId = senderJson['chat_id'] as int? ?? 0;
+          final chat = _chatsCache[senderId];
+          if (chat != null) {
+            senderName = chat.title;
+          }
+        }
+      }
+
+      // Get chat title
+      String chatTitle = '';
+      if (_chatsCache.containsKey(chatId)) {
+        chatTitle = _chatsCache[chatId]!.title;
+      } else if (_rawChatData.containsKey(chatId)) {
+        chatTitle = _rawChatData[chatId]!['title'] as String? ?? 'Chat $chatId';
+      }
+
+      // Get message content
+      String text = '';
+      String contentType = 'text';
+      final contentJson = msgJson['content'] as Map<String, dynamic>?;
+      if (contentJson != null) {
+        contentType = contentJson['@type'] as String? ?? 'text';
+        text = _getMessageTextFromRaw(contentJson);
+      }
+
+      return SearchResultMessage(
+        id: id,
+        chatId: chatId,
+        chatTitle: chatTitle,
+        senderId: senderId,
+        senderName: senderName,
+        text: text,
+        contentType: contentType,
+        date: date,
+        isOutgoing: isOutgoing,
+      );
+    } catch (e) {
+      _debugPrint('Error converting raw message to search result: $e');
+      return null;
+    }
   }
 
   /// Convert raw JSON message to TelegramMessage
@@ -2011,7 +2145,7 @@ class TelegramService {
         date: date,
       );
     } catch (e) {
-      print('Error converting raw message: $e');
+      _debugPrint('Error converting raw message: $e');
       return null;
     }
   }
@@ -2020,7 +2154,7 @@ class TelegramService {
   void _emitMessages(int chatId) {
     if (_messageControllers.containsKey(chatId)) {
       final messages = _messagesCache[chatId] ?? [];
-      print('Emitting ${messages.length} messages for chat $chatId');
+      _debugPrint('Emitting ${messages.length} messages for chat $chatId');
       _messageControllers[chatId]!.add(messages);
     }
   }
@@ -2527,12 +2661,6 @@ class TelegramService {
   // PHASE 3: SEARCH, MESSAGE ACTIONS, SETTINGS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // Search results stream
-  final _searchResultsController =
-      StreamController<List<TelegramChat>>.broadcast();
-  Stream<List<TelegramChat>> get searchResultsStream =>
-      _searchResultsController.stream;
-
   // Current user info
   Map<String, dynamic>? _currentUserInfo;
   Map<String, dynamic>? get currentUserInfo => _currentUserInfo;
@@ -2554,17 +2682,16 @@ class TelegramService {
     return chatsList;
   }
 
-  /// Search for chats by query
+  /// Search for chats by query (simple version using SearchPublicChats)
   Future<void> searchChats(String query) async {
     if (_clientId == 0 || query.isEmpty) {
-      _searchResultsController.add([]);
       return;
     }
 
     tdSend(_clientId, SearchChats(query: query, limit: 50));
   }
 
-  /// Search messages in a specific chat
+  /// Search messages in a specific chat (simple version)
   Future<void> searchMessagesInChat(
     int chatId,
     String query, {
@@ -2584,24 +2711,6 @@ class TelegramService {
         limit: limit,
         filter: null,
         messageThreadId: 0,
-      ),
-    );
-  }
-
-  /// Search messages globally
-  Future<void> searchMessages(String query, {int limit = 50}) async {
-    if (_clientId == 0 || query.isEmpty) return;
-
-    tdSend(
-      _clientId,
-      SearchMessages(
-        chatList: const ChatListMain(),
-        query: query,
-        offset: '',
-        limit: limit,
-        filter: null,
-        minDate: 0,
-        maxDate: 0,
       ),
     );
   }
@@ -2940,11 +3049,1079 @@ class TelegramService {
     if (messages == null) return null;
     return messages.where((m) => m.id == replyToMessageId).firstOrNull;
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CHAT MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Create a private chat with a user - returns immediately after sending request
+  Future<void> createPrivateChat(int userId) async {
+    if (_clientId == 0) return;
+
+    tdSend(_clientId, CreatePrivateChat(userId: userId, force: false));
+
+    // Wait a moment for the chat to be created and added to cache
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  /// Create a new basic group with users
+  Future<void> createBasicGroup({
+    required String title,
+    required List<int> userIds,
+    int messageAutoDeleteTime = 0,
+  }) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      CreateNewBasicGroupChat(
+        userIds: userIds,
+        title: title,
+        messageAutoDeleteTime: messageAutoDeleteTime,
+      ),
+    );
+
+    // Wait a moment for the chat to be created
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  /// Create a new supergroup or channel
+  Future<void> createSupergroup({
+    required String title,
+    String description = '',
+    bool isChannel = false,
+    bool isForum = false,
+    int messageAutoDeleteTime = 0,
+  }) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      CreateNewSupergroupChat(
+        title: title,
+        isForum: isForum,
+        isChannel: isChannel,
+        description: description,
+        location: null,
+        messageAutoDeleteTime: messageAutoDeleteTime,
+        forImport: false,
+      ),
+    );
+
+    // Wait a moment for the chat to be created
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  /// Add members to a chat
+  Future<void> addChatMembers(int chatId, List<int> userIds) async {
+    if (_clientId == 0) return;
+
+    for (final userId in userIds) {
+      tdSend(
+        _clientId,
+        AddChatMember(chatId: chatId, userId: userId, forwardLimit: 100),
+      );
+    }
+  }
+
+  /// Get chat member count
+  Future<int> getChatMemberCount(int chatId) async {
+    final chat = _chatsCache[chatId];
+    if (chat == null) return 0;
+
+    final chatType = chat.type;
+    if (chatType is ChatTypeBasicGroup) {
+      final group = _basicGroupsCache[chatType.basicGroupId];
+      return group?.memberCount ?? 0;
+    } else if (chatType is ChatTypeSupergroup) {
+      final supergroup = _supergroupsCache[chatType.supergroupId];
+      return supergroup?.memberCount ?? 0;
+    }
+    return chatType is ChatTypePrivate ? 2 : 0;
+  }
+
+  /// Set chat title
+  Future<void> setChatTitle(int chatId, String title) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, SetChatTitle(chatId: chatId, title: title));
+  }
+
+  /// Set chat description (for supergroups/channels)
+  Future<void> setChatDescription(int chatId, String description) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetChatDescription(chatId: chatId, description: description),
+    );
+  }
+
+  /// Leave a chat without deleting history
+  Future<void> leaveChat(int chatId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, LeaveChat(chatId: chatId));
+    _chatsCache.remove(chatId);
+    _rawChatData.remove(chatId);
+    _emitChats();
+  }
+
+  /// Delete chat history
+  Future<void> deleteChatHistory(
+    int chatId, {
+    bool removeFromChatList = false,
+    bool revoke = false,
+  }) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      DeleteChatHistory(
+        chatId: chatId,
+        removeFromChatList: removeFromChatList,
+        revoke: revoke,
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CHAT FOLDERS (FILTERS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Cache for chat folders
+  final List<TelegramChatFolder> _chatFolders = [];
+  List<TelegramChatFolder> get chatFolders => List.unmodifiable(_chatFolders);
+
+  /// Stream for chat folder updates
+  final _chatFoldersController =
+      StreamController<List<TelegramChatFolder>>.broadcast();
+  Stream<List<TelegramChatFolder>> get chatFoldersStream =>
+      _chatFoldersController.stream;
+
+  /// Load chat folders - folders are received automatically via UpdateChatFolders
+  /// This method just emits the current folders from cache
+  Future<void> loadChatFolders() async {
+    // Chat folders are sent automatically on connection
+    // Just emit the current cached folders
+    _chatFoldersController.add(_chatFolders);
+  }
+
+  /// Create a new chat folder
+  Future<void> createChatFolder({
+    required String title,
+    String? iconName,
+    List<int>? includedChatIds,
+    List<int>? pinnedChatIds,
+    List<int>? excludedChatIds,
+    bool includeContacts = false,
+    bool includeNonContacts = false,
+    bool includeGroups = false,
+    bool includeChannels = false,
+    bool includeBots = false,
+    bool excludeMuted = false,
+    bool excludeRead = false,
+    bool excludeArchived = false,
+  }) async {
+    if (_clientId == 0) return;
+
+    final folder = ChatFolder(
+      title: title,
+      icon: iconName != null ? ChatFolderIcon(name: iconName) : null,
+      isShareable: false,
+      pinnedChatIds: pinnedChatIds ?? [],
+      includedChatIds: includedChatIds ?? [],
+      excludedChatIds: excludedChatIds ?? [],
+      excludeMuted: excludeMuted,
+      excludeRead: excludeRead,
+      excludeArchived: excludeArchived,
+      includeContacts: includeContacts,
+      includeNonContacts: includeNonContacts,
+      includeBots: includeBots,
+      includeGroups: includeGroups,
+      includeChannels: includeChannels,
+    );
+
+    tdSend(_clientId, CreateChatFolder(folder: folder));
+
+    // Wait for folder to be created then reload
+    await Future.delayed(const Duration(milliseconds: 500));
+    loadChatFolders();
+  }
+
+  /// Edit an existing chat folder
+  Future<void> editChatFolder(
+    int folderId, {
+    String? title,
+    String? iconName,
+    List<int>? includedChatIds,
+    List<int>? pinnedChatIds,
+    List<int>? excludedChatIds,
+    bool? includeContacts,
+    bool? includeNonContacts,
+    bool? includeGroups,
+    bool? includeChannels,
+    bool? includeBots,
+    bool? excludeMuted,
+    bool? excludeRead,
+    bool? excludeArchived,
+  }) async {
+    if (_clientId == 0) return;
+
+    // Get existing folder first
+    final existing = _chatFolders.firstWhere(
+      (f) => f.id == folderId,
+      orElse: () => throw Exception('Folder not found'),
+    );
+
+    final folder = ChatFolder(
+      title: title ?? existing.title,
+      icon: iconName != null
+          ? ChatFolderIcon(name: iconName)
+          : (existing.iconName != null
+                ? ChatFolderIcon(name: existing.iconName!)
+                : null),
+      isShareable: false,
+      pinnedChatIds: pinnedChatIds ?? existing.pinnedChatIds,
+      includedChatIds: includedChatIds ?? existing.includedChatIds,
+      excludedChatIds: excludedChatIds ?? existing.excludedChatIds,
+      excludeMuted: excludeMuted ?? existing.excludeMuted,
+      excludeRead: excludeRead ?? existing.excludeRead,
+      excludeArchived: excludeArchived ?? existing.excludeArchived,
+      includeContacts: includeContacts ?? existing.includeContacts,
+      includeNonContacts: includeNonContacts ?? existing.includeNonContacts,
+      includeBots: includeBots ?? existing.includeBots,
+      includeGroups: includeGroups ?? existing.includeGroups,
+      includeChannels: includeChannels ?? existing.includeChannels,
+    );
+
+    tdSend(_clientId, EditChatFolder(chatFolderId: folderId, folder: folder));
+
+    // Reload folders after edit
+    Future.delayed(const Duration(milliseconds: 500), loadChatFolders);
+  }
+
+  /// Delete a chat folder
+  Future<void> deleteChatFolder(int folderId, {List<int>? leaveChatIds}) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      DeleteChatFolder(
+        chatFolderId: folderId,
+        leaveChatIds: leaveChatIds ?? [],
+      ),
+    );
+
+    _chatFolders.removeWhere((f) => f.id == folderId);
+    _chatFoldersController.add(_chatFolders);
+  }
+
+  /// Add a chat to a folder
+  Future<void> addChatToFolder(int chatId, int folderId) async {
+    final folder = _chatFolders.firstWhere(
+      (f) => f.id == folderId,
+      orElse: () => throw Exception('Folder not found'),
+    );
+
+    final newIncludedChatIds = [...folder.includedChatIds, chatId];
+    await editChatFolder(folderId, includedChatIds: newIncludedChatIds);
+  }
+
+  /// Remove a chat from a folder
+  Future<void> removeChatFromFolder(int chatId, int folderId) async {
+    final folder = _chatFolders.firstWhere(
+      (f) => f.id == folderId,
+      orElse: () => throw Exception('Folder not found'),
+    );
+
+    final newIncludedChatIds = folder.includedChatIds
+        .where((id) => id != chatId)
+        .toList();
+    await editChatFolder(folderId, includedChatIds: newIncludedChatIds);
+  }
+
+  /// Get chats for a specific folder
+  Future<void> loadChatsForFolder(int folderId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      LoadChats(chatList: ChatListFolder(chatFolderId: folderId), limit: 100),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ARCHIVE MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Cache for archived chats
+  final Map<int, Chat> _archivedChatsCache = {};
+  final Map<int, Map<String, dynamic>> _rawArchivedChatData = {};
+  List<int> _archivedChatIds = [];
+
+  /// Stream for archived chats
+  final _archivedChatsController =
+      StreamController<List<TelegramChat>>.broadcast();
+  Stream<List<TelegramChat>> get archivedChatsStream =>
+      _archivedChatsController.stream;
+
+  /// Get archived chats list
+  List<TelegramChat> get archivedChats {
+    return _archivedChatIds
+        .map((chatId) {
+          final chat = _archivedChatsCache[chatId];
+          if (chat == null) return null;
+          // Convert Chat to TelegramChat - simplified version
+          final title = chat.title;
+          String? photoUrl;
+          if (chat.photo != null &&
+              chat.photo!.small.local.isDownloadingCompleted) {
+            photoUrl = chat.photo!.small.local.path;
+          }
+          final lastMessageContent = chat.lastMessage?.content;
+          String lastMessageText = '';
+          if (lastMessageContent is MessageText) {
+            lastMessageText = lastMessageContent.text.text;
+          }
+          final date = chat.lastMessage?.date ?? 0;
+          final time = date > 0 ? _formatMessageTime(date) : '';
+          return TelegramChat(
+            id: chat.id,
+            title: title,
+            photoUrl: photoUrl,
+            lastMessage: lastMessageText,
+            lastMessageTime: time,
+            unreadCount: chat.unreadCount,
+            isRead: chat.unreadCount == 0,
+            isSentByMe: chat.lastMessage?.isOutgoing ?? false,
+            lastMessageDate: date,
+            order: 0,
+          );
+        })
+        .whereType<TelegramChat>()
+        .toList();
+  }
+
+  /// Load archived chats
+  Future<void> loadArchivedChats({int limit = 50}) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      LoadChats(chatList: const ChatListArchive(), limit: limit),
+    );
+  }
+
+  /// Archive settings
+  bool _hideArchivedChats = false;
+  bool get hideArchivedChats => _hideArchivedChats;
+
+  /// Set archive chat list settings
+  Future<void> setArchiveAndMuteNewChats(bool archiveAndMute) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetArchiveChatListSettings(
+        settings: ArchiveChatListSettings(
+          archiveAndMuteNewChatsFromUnknownUsers: archiveAndMute,
+          keepUnmutedChatsArchived: false,
+          keepChatsFromFoldersArchived: false,
+        ),
+      ),
+    );
+  }
+
+  /// Toggle hide archived chats setting (local only)
+  void setHideArchivedChats(bool hide) {
+    _hideArchivedChats = hide;
+    _archivedChatsController.add(archivedChats);
+  }
+
+  void _emitArchivedChats() {
+    _archivedChatsController.add(archivedChats);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SUPERGROUP MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Get supergroup full info - sends request only, response handled via updates
+  Future<void> requestSupergroupFullInfo(int supergroupId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, GetSupergroupFullInfo(supergroupId: supergroupId));
+  }
+
+  /// Get supergroup members - sends request only
+  Future<void> requestSupergroupMembers(
+    int supergroupId, {
+    int offset = 0,
+    int limit = 200,
+  }) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      GetSupergroupMembers(
+        supergroupId: supergroupId,
+        filter: const SupergroupMembersFilterRecent(),
+        offset: offset,
+        limit: limit,
+      ),
+    );
+  }
+
+  /// Set supergroup username
+  Future<void> setSupergroupUsername(int supergroupId, String username) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetSupergroupUsername(supergroupId: supergroupId, username: username),
+    );
+  }
+
+  /// Toggle supergroup sign messages
+  Future<void> toggleSupergroupSignMessages(
+    int supergroupId,
+    bool signMessages,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      ToggleSupergroupSignMessages(
+        supergroupId: supergroupId,
+        signMessages: signMessages,
+      ),
+    );
+  }
+
+  /// Toggle supergroup join to send messages
+  Future<void> toggleSupergroupJoinToSendMessages(
+    int supergroupId,
+    bool joinToSendMessages,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      ToggleSupergroupJoinToSendMessages(
+        supergroupId: supergroupId,
+        joinToSendMessages: joinToSendMessages,
+      ),
+    );
+  }
+
+  /// Toggle supergroup join by request
+  Future<void> toggleSupergroupJoinByRequest(
+    int supergroupId,
+    bool joinByRequest,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      ToggleSupergroupJoinByRequest(
+        supergroupId: supergroupId,
+        joinByRequest: joinByRequest,
+      ),
+    );
+  }
+
+  /// Toggle supergroup is all history available
+  Future<void> toggleSupergroupIsAllHistoryAvailable(
+    int supergroupId,
+    bool isAllHistoryAvailable,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      ToggleSupergroupIsAllHistoryAvailable(
+        supergroupId: supergroupId,
+        isAllHistoryAvailable: isAllHistoryAvailable,
+      ),
+    );
+  }
+
+  /// Set supergroup sticker set
+  Future<void> setSupergroupStickerSet(
+    int supergroupId,
+    int stickerSetId,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetSupergroupStickerSet(
+        supergroupId: supergroupId,
+        stickerSetId: stickerSetId,
+      ),
+    );
+  }
+
+  /// Promote/demote a member in supergroup
+  Future<void> setSupergroupMemberStatus(
+    int supergroupId,
+    int userId, {
+    bool canManageChat = false,
+    bool canChangeInfo = false,
+    bool canPostMessages = false,
+    bool canEditMessages = false,
+    bool canDeleteMessages = false,
+    bool canInviteUsers = false,
+    bool canRestrictMembers = false,
+    bool canPinMessages = false,
+    bool canPromoteMembers = false,
+    bool canManageVideoChats = false,
+    bool isAnonymous = false,
+  }) async {
+    if (_clientId == 0) return;
+
+    final chat = _chatsCache.values.firstWhere(
+      (c) =>
+          c.type is ChatTypeSupergroup &&
+          (c.type as ChatTypeSupergroup).supergroupId == supergroupId,
+      orElse: () => throw Exception('Chat not found'),
+    );
+
+    tdSend(
+      _clientId,
+      SetChatMemberStatus(
+        chatId: chat.id,
+        memberId: MessageSenderUser(userId: userId),
+        status: ChatMemberStatusAdministrator(
+          customTitle: '',
+          canBeEdited: true,
+          rights: ChatAdministratorRights(
+            canManageChat: canManageChat,
+            canChangeInfo: canChangeInfo,
+            canPostMessages: canPostMessages,
+            canEditMessages: canEditMessages,
+            canDeleteMessages: canDeleteMessages,
+            canInviteUsers: canInviteUsers,
+            canRestrictMembers: canRestrictMembers,
+            canPinMessages: canPinMessages,
+            canManageTopics: false,
+            canPromoteMembers: canPromoteMembers,
+            canManageVideoChats: canManageVideoChats,
+            isAnonymous: isAnonymous,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Ban a member from supergroup
+  Future<void> banSupergroupMember(
+    int supergroupId,
+    int userId, {
+    int bannedUntilDate = 0, // 0 = forever
+  }) async {
+    if (_clientId == 0) return;
+
+    final chat = _chatsCache.values.firstWhere(
+      (c) =>
+          c.type is ChatTypeSupergroup &&
+          (c.type as ChatTypeSupergroup).supergroupId == supergroupId,
+      orElse: () => throw Exception('Chat not found'),
+    );
+
+    tdSend(
+      _clientId,
+      SetChatMemberStatus(
+        chatId: chat.id,
+        memberId: MessageSenderUser(userId: userId),
+        status: ChatMemberStatusBanned(bannedUntilDate: bannedUntilDate),
+      ),
+    );
+  }
+
+  /// Unban a member from supergroup
+  Future<void> unbanSupergroupMember(int supergroupId, int userId) async {
+    if (_clientId == 0) return;
+
+    final chat = _chatsCache.values.firstWhere(
+      (c) =>
+          c.type is ChatTypeSupergroup &&
+          (c.type as ChatTypeSupergroup).supergroupId == supergroupId,
+      orElse: () => throw Exception('Chat not found'),
+    );
+
+    tdSend(
+      _clientId,
+      SetChatMemberStatus(
+        chatId: chat.id,
+        memberId: MessageSenderUser(userId: userId),
+        status: const ChatMemberStatusMember(),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONTACTS / USERS SEARCH
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Cached contacts
+  final List<TelegramContact> _contacts = [];
+  List<TelegramContact> get contacts => List.unmodifiable(_contacts);
+
+  /// Stream for contacts
+  final _contactsController =
+      StreamController<List<TelegramContact>>.broadcast();
+  Stream<List<TelegramContact>> get contactsStream =>
+      _contactsController.stream;
+
+  /// Load contacts
+  Future<void> loadContacts() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const GetContacts());
+  }
+
+  /// Search users by username or phone - returns cached results that match
+  List<TelegramChat> searchPublicChats(String query) {
+    if (query.isEmpty) return [];
+
+    // Search in cached chats
+    final q = query.toLowerCase();
+    return chats.where((chat) {
+      return chat.title.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  /// Search contacts in cache
+  List<TelegramContact> searchContacts(String query, {int limit = 50}) {
+    if (query.isEmpty) return _contacts.take(limit).toList();
+
+    final q = query.toLowerCase();
+    return _contacts
+        .where((contact) {
+          return contact.fullName.toLowerCase().contains(q) ||
+              (contact.phone?.contains(q) ?? false) ||
+              (contact.username?.toLowerCase().contains(q) ?? false);
+        })
+        .take(limit)
+        .toList();
+  }
+
+  /// Request search from server (results come via updates)
+  void requestSearchPublicChats(String query) {
+    if (_clientId == 0 || query.isEmpty) return;
+    tdSend(_clientId, SearchPublicChats(query: query));
+  }
+
+  /// Request contact search from server
+  void requestSearchContacts(String query, {int limit = 50}) {
+    if (_clientId == 0) return;
+    tdSend(_clientId, SearchContacts(query: query, limit: limit));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SEARCH FUNCTIONALITY
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Stream for message search results
+  final _searchResultsController = StreamController<SearchResults>.broadcast();
+  Stream<SearchResults> get searchResultsStream =>
+      _searchResultsController.stream;
+
+  /// Stream for chat search results (separate from message search)
+  final _chatSearchResultsController =
+      StreamController<List<TelegramChat>>.broadcast();
+  Stream<List<TelegramChat>> get chatSearchResultsStream =>
+      _chatSearchResultsController.stream;
+
+  /// Current search results cache
+  SearchResults? _lastSearchResults;
+  SearchResults? get lastSearchResults => _lastSearchResults;
+
+  /// Search chats locally (in cache)
+  List<TelegramChat> searchChatsLocal(String query) {
+    if (query.isEmpty) return [];
+    final q = query.toLowerCase();
+    return chats.where((chat) {
+      return chat.title.toLowerCase().contains(q) ||
+          chat.lastMessage.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  /// Search messages globally across all chats
+  Future<void> searchMessages({
+    required String query,
+    int limit = 50,
+    String offset = '',
+    SearchMessagesFilter? filter,
+    int? minDate,
+    int? maxDate,
+  }) async {
+    if (_clientId == 0 || query.isEmpty) return;
+
+    _debugPrint('Searching messages: "$query" (limit: $limit)');
+
+    tdSend(
+      _clientId,
+      SearchMessages(
+        chatList: const ChatListMain(),
+        query: query,
+        offset: offset,
+        limit: limit,
+        filter: filter,
+        minDate: minDate ?? 0,
+        maxDate: maxDate ?? 0,
+      ),
+    );
+  }
+
+  /// Search messages within a specific chat
+  Future<void> searchChatMessages({
+    required int chatId,
+    required String query,
+    int limit = 50,
+    int fromMessageId = 0,
+    int senderId = 0,
+    SearchMessagesFilter? filter,
+  }) async {
+    if (_clientId == 0 || query.isEmpty) return;
+
+    _debugPrint('Searching in chat $chatId: "$query"');
+
+    tdSend(
+      _clientId,
+      SearchChatMessages(
+        chatId: chatId,
+        query: query,
+        senderId: senderId != 0 ? MessageSenderUser(userId: senderId) : null,
+        fromMessageId: fromMessageId,
+        offset: 0,
+        limit: limit,
+        filter: filter,
+        messageThreadId: 0,
+      ),
+    );
+  }
+
+  /// Search messages by date range
+  Future<void> searchMessagesByDate({
+    required String query,
+    required DateTime startDate,
+    required DateTime endDate,
+    int limit = 50,
+    SearchMessagesFilter? filter,
+  }) async {
+    final minDate = startDate.millisecondsSinceEpoch ~/ 1000;
+    final maxDate = endDate.millisecondsSinceEpoch ~/ 1000;
+
+    await searchMessages(
+      query: query,
+      limit: limit,
+      minDate: minDate,
+      maxDate: maxDate,
+      filter: filter,
+    );
+  }
+
+  /// Get messages on a specific date in a chat
+  Future<void> getChatMessagesByDate({
+    required int chatId,
+    required DateTime date,
+  }) async {
+    if (_clientId == 0) return;
+
+    final timestamp = date.millisecondsSinceEpoch ~/ 1000;
+    _debugPrint('Getting messages for chat $chatId on date: $date');
+
+    tdSend(_clientId, GetChatMessageByDate(chatId: chatId, date: timestamp));
+  }
+
+  /// Search hashtags globally
+  Future<void> searchHashtag(String hashtag, {int limit = 50}) async {
+    final query = hashtag.startsWith('#') ? hashtag : '#$hashtag';
+    await searchMessages(query: query, limit: limit);
+  }
+
+  /// Handle search messages response
+  void _handleSearchMessagesResult(FoundMessages result) {
+    final messages = <SearchResultMessage>[];
+
+    for (final msg in result.messages) {
+      final converted = _convertMessageToSearchResult(msg);
+      if (converted != null) {
+        messages.add(converted);
+      }
+    }
+
+    _lastSearchResults = SearchResults(
+      messages: messages,
+      totalCount: result.totalCount,
+      nextOffset: result.nextOffset,
+    );
+
+    _searchResultsController.add(_lastSearchResults!);
+    _debugPrint(
+      'Search returned ${messages.length} messages (total: ${result.totalCount})',
+    );
+  }
+
+  /// Handle chat messages search response
+  void _handleChatMessagesSearchResult(int chatId, FoundChatMessages result) {
+    final messages = <SearchResultMessage>[];
+
+    for (final msg in result.messages) {
+      final converted = _convertMessageToSearchResult(msg);
+      if (converted != null) {
+        messages.add(converted);
+      }
+    }
+
+    _lastSearchResults = SearchResults(
+      messages: messages,
+      totalCount: result.totalCount,
+      nextFromMessageId: result.nextFromMessageId,
+      chatId: chatId,
+    );
+
+    _searchResultsController.add(_lastSearchResults!);
+    _debugPrint(
+      'Chat search returned ${messages.length} messages in chat $chatId',
+    );
+  }
+
+  /// Convert TDLib message to search result
+  SearchResultMessage? _convertMessageToSearchResult(Message msg) {
+    try {
+      final content = msg.content;
+      String text = '';
+      String contentType = 'unknown';
+
+      if (content is MessageText) {
+        text = content.text.text;
+        contentType = 'text';
+      } else if (content is MessagePhoto) {
+        text = content.caption.text.isNotEmpty
+            ? content.caption.text
+            : '📷 Photo';
+        contentType = 'photo';
+      } else if (content is MessageVideo) {
+        text = content.caption.text.isNotEmpty
+            ? content.caption.text
+            : '🎬 Video';
+        contentType = 'video';
+      } else if (content is MessageDocument) {
+        final fileName = content.document.fileName;
+        text = content.caption.text.isNotEmpty
+            ? content.caption.text
+            : '📄 $fileName';
+        contentType = 'document';
+      } else if (content is MessageVoiceNote) {
+        text = content.caption.text.isNotEmpty
+            ? content.caption.text
+            : '🎤 Voice message';
+        contentType = 'voice';
+      } else if (content is MessageAudio) {
+        text = content.caption.text.isNotEmpty
+            ? content.caption.text
+            : '🎵 Audio';
+        contentType = 'audio';
+      } else if (content is MessageSticker) {
+        text = '${content.sticker.emoji} Sticker';
+        contentType = 'sticker';
+      } else if (content is MessageAnimation) {
+        text = content.caption.text.isNotEmpty ? content.caption.text : 'GIF';
+        contentType = 'animation';
+      } else if (content is MessageLocation) {
+        text = '📍 Location';
+        contentType = 'location';
+      } else if (content is MessageContact) {
+        text = '👤 ${content.contact.firstName} ${content.contact.lastName}'
+            .trim();
+        contentType = 'contact';
+      } else {
+        text = 'Message';
+        contentType = content.runtimeType.toString();
+      }
+
+      // Get sender info
+      String senderName = '';
+      int senderId = 0;
+      final sender = msg.senderId;
+      if (sender is MessageSenderUser) {
+        senderId = sender.userId;
+        final user = _usersCache[sender.userId];
+        if (user != null) {
+          senderName = '${user.firstName} ${user.lastName}'.trim();
+        }
+      } else if (sender is MessageSenderChat) {
+        senderId = sender.chatId;
+        final chat = _chatsCache[sender.chatId];
+        if (chat != null) {
+          senderName = chat.title;
+        }
+      }
+
+      // Get chat info
+      String chatTitle = '';
+      final chat = _chatsCache[msg.chatId];
+      if (chat != null) {
+        chatTitle = chat.title;
+      }
+
+      return SearchResultMessage(
+        id: msg.id,
+        chatId: msg.chatId,
+        chatTitle: chatTitle,
+        senderId: senderId,
+        senderName: senderName,
+        text: text,
+        contentType: contentType,
+        date: msg.date,
+        isOutgoing: msg.isOutgoing,
+      );
+    } catch (e) {
+      _debugPrint('Error converting message to search result: $e');
+      return null;
+    }
+  }
+
+  /// Clear search results
+  void clearSearchResults() {
+    _lastSearchResults = null;
+    _searchResultsController.add(SearchResults(messages: [], totalCount: 0));
+  }
+
+  /// Search filters
+  static final searchFilterPhotos = SearchMessagesFilterPhoto();
+  static final searchFilterVideos = SearchMessagesFilterVideo();
+  static final searchFilterDocuments = SearchMessagesFilterDocument();
+  static final searchFilterAudio = SearchMessagesFilterAudio();
+  static final searchFilterVoice = SearchMessagesFilterVoiceNote();
+  static final searchFilterLinks = SearchMessagesFilterUrl();
+  static final searchFilterMentions = SearchMessagesFilterMention();
+  static final searchFilterUnread = SearchMessagesFilterUnreadMention();
+}
+
+/// Search results container
+class SearchResults {
+  final List<SearchResultMessage> messages;
+  final int totalCount;
+  final String? nextOffset;
+  final int? nextFromMessageId;
+  final int? chatId;
+
+  SearchResults({
+    required this.messages,
+    required this.totalCount,
+    this.nextOffset,
+    this.nextFromMessageId,
+    this.chatId,
+  });
+}
+
+/// Individual search result message
+class SearchResultMessage {
+  final int id;
+  final int chatId;
+  final String chatTitle;
+  final int senderId;
+  final String senderName;
+  final String text;
+  final String contentType;
+  final int date;
+  final bool isOutgoing;
+
+  SearchResultMessage({
+    required this.id,
+    required this.chatId,
+    required this.chatTitle,
+    required this.senderId,
+    required this.senderName,
+    required this.text,
+    required this.contentType,
+    required this.date,
+    required this.isOutgoing,
+  });
+
+  DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(date * 1000);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPER CLASSES FOR PHASE 2
 // ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents a chat folder
+class TelegramChatFolder {
+  final int id;
+  final String title;
+  final String? iconName;
+  final bool isShareable;
+  final List<int> pinnedChatIds;
+  final List<int> includedChatIds;
+  final List<int> excludedChatIds;
+  final bool excludeMuted;
+  final bool excludeRead;
+  final bool excludeArchived;
+  final bool includeContacts;
+  final bool includeNonContacts;
+  final bool includeBots;
+  final bool includeGroups;
+  final bool includeChannels;
+
+  TelegramChatFolder({
+    required this.id,
+    required this.title,
+    this.iconName,
+    this.isShareable = false,
+    this.pinnedChatIds = const [],
+    this.includedChatIds = const [],
+    this.excludedChatIds = const [],
+    this.excludeMuted = false,
+    this.excludeRead = false,
+    this.excludeArchived = false,
+    this.includeContacts = false,
+    this.includeNonContacts = false,
+    this.includeBots = false,
+    this.includeGroups = false,
+    this.includeChannels = false,
+  });
+
+  factory TelegramChatFolder.fromInfo(ChatFolderInfo info) {
+    return TelegramChatFolder(
+      id: info.id,
+      title: info.title,
+      iconName: info.icon?.name,
+      isShareable: info.isShareable,
+    );
+  }
+
+  factory TelegramChatFolder.fromFolder(int id, ChatFolder folder) {
+    return TelegramChatFolder(
+      id: id,
+      title: folder.title,
+      iconName: folder.icon?.name,
+      isShareable: folder.isShareable,
+      pinnedChatIds: folder.pinnedChatIds,
+      includedChatIds: folder.includedChatIds,
+      excludedChatIds: folder.excludedChatIds,
+      excludeMuted: folder.excludeMuted,
+      excludeRead: folder.excludeRead,
+      excludeArchived: folder.excludeArchived,
+      includeContacts: folder.includeContacts,
+      includeNonContacts: folder.includeNonContacts,
+      includeBots: folder.includeBots,
+      includeGroups: folder.includeGroups,
+      includeChannels: folder.includeChannels,
+    );
+  }
+}
+
+/// Represents a contact
+class TelegramContact {
+  final int id;
+  final String firstName;
+  final String lastName;
+  final String? phone;
+  final String? username;
+  final String? photoUrl;
+
+  TelegramContact({
+    required this.id,
+    required this.firstName,
+    required this.lastName,
+    this.phone,
+    this.username,
+    this.photoUrl,
+  });
+
+  String get fullName => '$firstName $lastName'.trim();
+}
 
 /// Represents file download progress
 class FileDownloadProgress {

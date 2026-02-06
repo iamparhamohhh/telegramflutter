@@ -38,7 +38,7 @@ class _SettingPageState extends State<SettingPage> {
         });
       }
     } catch (e) {
-      print('Error loading user data: $e');
+      // Silently handle errors in production
       if (mounted) {
         setState(() {
           _isLoading = false;

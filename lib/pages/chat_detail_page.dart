@@ -5,6 +5,7 @@ import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/pages/profile_page.dart';
 import 'package:telegramflutter/pages/media_viewer_page.dart';
+import 'package:telegramflutter/pages/search_page.dart';
 import 'package:telegramflutter/widgets/media_widgets.dart';
 import 'package:telegramflutter/models/user_profile.dart';
 import 'package:image_picker/image_picker.dart';
@@ -17,16 +18,29 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:open_file/open_file.dart';
 
 class ChatDetailPage extends StatefulWidget {
-  final String name;
-  final String img;
-  final int chatId;
+  final TelegramChat? chat;
+  final String? name;
+  final String? img;
+  final String? imageUrl;
+  final int? chatId;
+  final int? actualChatId;
+  final int? highlightMessageId; // Message to scroll to and highlight
 
   const ChatDetailPage({
     super.key,
-    required this.name,
-    required this.img,
-    required this.chatId,
+    this.chat,
+    this.name,
+    this.img,
+    this.imageUrl,
+    this.chatId,
+    this.actualChatId,
+    this.highlightMessageId,
   });
+
+  // Convenience getters
+  String get chatName => chat?.title ?? name ?? 'Chat';
+  String get chatImg => chat?.photoUrl ?? imageUrl ?? img ?? '';
+  int get realChatId => chat?.id ?? actualChatId ?? chatId ?? 0;
 
   @override
   State<ChatDetailPage> createState() => _ChatDetailPageState();
@@ -64,9 +78,14 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   int? _playingMessageId;
   double _playbackProgress = 0.0;
 
+  // Highlight message state
+  int? _highlightedMessageId;
+  bool _highlightAnimating = false;
+
   @override
   void initState() {
     super.initState();
+    _highlightedMessageId = widget.highlightMessageId;
     _loadMessages();
     _loadStatus();
 
@@ -82,7 +101,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     _scrollController.addListener(_onScroll);
 
     // Mark chat as read when opening
-    _telegramService.markChatAsRead(widget.chatId);
+    _telegramService.markChatAsRead(widget.realChatId);
   }
 
   void _onScroll() {
@@ -106,7 +125,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       final previousCount = _messages.length;
 
       await _telegramService.loadChatHistory(
-        widget.chatId,
+        widget.realChatId,
         limit: 50,
         fromMessageId: oldestMessage.id,
       );
@@ -123,7 +142,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         });
       }
     } catch (e) {
-      print('Error loading more messages: $e');
+      // Silently handle errors
       if (mounted) {
         setState(() {
           _isLoadingMore = false;
@@ -146,7 +165,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   void _loadStatus() {
     // Load online status for private chats
-    final userId = _telegramService.getChatUserId(widget.chatId);
+    final userId = _telegramService.getChatUserId(widget.realChatId);
     if (userId != null) {
       _telegramService.requestUser(userId);
       setState(() {
@@ -155,29 +174,27 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       });
     } else {
       setState(() {
-        _statusText = _telegramService.getChatSubtitle(widget.chatId);
+        _statusText = _telegramService.getChatSubtitle(widget.realChatId);
       });
     }
   }
 
   void _loadMessages() {
-    print('ChatDetailPage: Loading messages for chat ${widget.chatId}');
-
     // Subscribe to message stream for this chat
     _messagesSubscription = _telegramService
-        .getMessagesStream(widget.chatId)
+        .getMessagesStream(widget.realChatId)
         .listen(
           (messages) {
-            print('ChatDetailPage: Received ${messages.length} messages');
             if (mounted) {
               setState(() {
                 _messages = messages;
                 _isLoading = false;
               });
+              // Scroll to highlighted message if set
+              _scrollToHighlightedMessage();
             }
           },
           onError: (error) {
-            print('ChatDetailPage: Stream error: $error');
             if (mounted) {
               setState(() {
                 _isLoading = false;
@@ -187,16 +204,18 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         );
 
     // Get any cached messages first
-    final cachedMessages = _telegramService.getMessages(widget.chatId);
+    final cachedMessages = _telegramService.getMessages(widget.realChatId);
     if (cachedMessages.isNotEmpty) {
       setState(() {
         _messages = cachedMessages;
         _isLoading = false;
       });
+      // Scroll to highlighted message if set
+      _scrollToHighlightedMessage();
     }
 
     // Request to load chat history - load more for complete history
-    _telegramService.loadChatHistory(widget.chatId, limit: 100);
+    _telegramService.loadChatHistory(widget.realChatId, limit: 100);
 
     // Set a timeout
     Future.delayed(const Duration(seconds: 10), () {
@@ -205,6 +224,47 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           _isLoading = false;
         });
       }
+    });
+  }
+
+  void _scrollToHighlightedMessage() {
+    if (_highlightedMessageId == null || _messages.isEmpty) return;
+
+    // Find the index of the highlighted message
+    final index = _messages.indexWhere((m) => m.id == _highlightedMessageId);
+    if (index == -1) return;
+
+    // Since the list is reversed, we need to scroll to the correct position
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+
+      // Estimate scroll position (rough calculation for reversed list)
+      // Each message is roughly 60-100 pixels, we use 80 as average
+      final estimatedPosition = index * 80.0;
+
+      _scrollController
+          .animateTo(
+            estimatedPosition,
+            duration: Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          )
+          .then((_) {
+            // Trigger highlight animation
+            if (mounted) {
+              setState(() {
+                _highlightAnimating = true;
+              });
+              // Clear highlight after animation
+              Future.delayed(Duration(seconds: 2), () {
+                if (mounted) {
+                  setState(() {
+                    _highlightAnimating = false;
+                    _highlightedMessageId = null;
+                  });
+                }
+              });
+            }
+          });
     });
   }
 
@@ -222,7 +282,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       if (_editingMessage != null) {
         // Edit existing message
         await _telegramService.editMessage(
-          widget.chatId,
+          widget.realChatId,
           _editingMessage!.id,
           text,
         );
@@ -230,14 +290,14 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       } else if (_replyToMessage != null) {
         // Reply to message
         await _telegramService.replyToMessage(
-          widget.chatId,
+          widget.realChatId,
           _replyToMessage!.id,
           text,
         );
         _cancelReply();
       } else {
         // Send normal message
-        await _telegramService.sendMessage(widget.chatId, text);
+        await _telegramService.sendMessage(widget.realChatId, text);
       }
 
       // Scroll to bottom after sending
@@ -251,7 +311,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         }
       });
     } catch (e) {
-      print('Error sending message: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -419,7 +478,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                 itemCount: chats.length,
                 itemBuilder: (context, index) {
                   final chat = chats[index];
-                  if (chat.id == widget.chatId) return SizedBox.shrink();
+                  if (chat.id == widget.realChatId) return SizedBox.shrink();
                   return ListTile(
                     leading: CircleAvatar(
                       backgroundColor: Color(0xFF37AEE2),
@@ -435,7 +494,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                       Navigator.pop(context);
                       try {
                         await _telegramService.forwardMessages(
-                          widget.chatId,
+                          widget.realChatId,
                           chat.id,
                           [message.id],
                         );
@@ -504,7 +563,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               onPressed: () async {
                 Navigator.pop(context);
                 try {
-                  await _telegramService.deleteMessages(widget.chatId, [
+                  await _telegramService.deleteMessages(widget.realChatId, [
                     message.id,
                   ], revokeForAll: deleteForAll);
                   if (mounted) {
@@ -563,9 +622,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             context,
             MaterialPageRoute(
               builder: (context) => ProfilePage(
-                chatId: widget.chatId,
-                chatTitle: widget.name,
-                chatPhotoPath: widget.img.isNotEmpty ? widget.img : null,
+                chatId: widget.realChatId,
+                chatTitle: widget.chatName,
+                chatPhotoPath: widget.chatImg.isNotEmpty
+                    ? widget.chatImg
+                    : null,
               ),
             ),
           );
@@ -573,21 +634,21 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         child: Row(
           children: [
             Hero(
-              tag: 'avatar_${widget.chatId}',
+              tag: 'avatar_${widget.realChatId}',
               child: Container(
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _getAvatarColor(widget.name),
+                  color: _getAvatarColor(widget.chatName),
                 ),
                 child: Stack(
                   children: [
-                    widget.img.isNotEmpty
+                    widget.chatImg.isNotEmpty
                         ? ClipOval(
-                            child: widget.img.startsWith('http')
+                            child: widget.chatImg.startsWith('http')
                                 ? Image.network(
-                                    widget.img,
+                                    widget.chatImg,
                                     fit: BoxFit.cover,
                                     width: 38,
                                     height: 38,
@@ -596,7 +657,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                                             _buildInitials(),
                                   )
                                 : Image.file(
-                                    File(widget.img),
+                                    File(widget.chatImg),
                                     fit: BoxFit.cover,
                                     width: 38,
                                     height: 38,
@@ -632,7 +693,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    widget.name,
+                    widget.chatName,
                     style: const TextStyle(
                       fontSize: 16,
                       color: white,
@@ -656,6 +717,22 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         ),
       ),
       actions: [
+        IconButton(
+          onPressed: () {
+            // Open search page with this chat
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => SearchPage(
+                  initialChatId: widget.realChatId,
+                  initialChatTitle: widget.chatName,
+                ),
+              ),
+            );
+          },
+          icon: Icon(Icons.search, color: white.withOpacity(0.8), size: 24),
+          tooltip: 'Search in chat',
+        ),
         IconButton(
           onPressed: () {},
           icon: Icon(Icons.call, color: white.withOpacity(0.8), size: 24),
@@ -718,7 +795,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                           Text(
                             isEditing
                                 ? 'Edit message'
-                                : 'Reply to ${_replyToMessage!.isOutgoing ? 'yourself' : (_replyToMessage!.senderName ?? widget.name)}',
+                                : 'Reply to ${_replyToMessage!.isOutgoing ? 'yourself' : (_replyToMessage!.senderName ?? widget.chatName)}',
                             style: TextStyle(
                               color: isEditing
                                   ? Colors.orange
@@ -1000,7 +1077,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         _showSendMediaDialog(image.path, 'photo');
       }
     } catch (e) {
-      print('Error picking image: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1020,7 +1096,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         _showSendMediaDialog(photo.path, 'photo');
       }
     } catch (e) {
-      print('Error taking photo: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1040,7 +1115,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         _showSendMediaDialog(video.path, 'video');
       }
     } catch (e) {
-      print('Error picking video: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1062,7 +1136,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         }
       }
     } catch (e) {
-      print('Error picking file: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1085,7 +1158,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         }
       }
     } catch (e) {
-      print('Error picking audio: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1155,7 +1227,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       _showLocationConfirmDialog(position.latitude, position.longitude);
     } catch (e) {
       Navigator.pop(context); // Dismiss loading if error
-      print('Error getting location: $e');
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1193,7 +1265,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             onPressed: () {
               Navigator.pop(context);
               _telegramService.sendLocation(
-                widget.chatId,
+                widget.realChatId,
                 latitude,
                 longitude,
                 replyToMessageId: _replyToMessage?.id,
@@ -1266,7 +1338,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                   phoneController.text.isNotEmpty) {
                 Navigator.pop(context);
                 _telegramService.sendContact(
-                  widget.chatId,
+                  widget.realChatId,
                   phoneController.text,
                   nameController.text,
                   replyToMessageId: _replyToMessage?.id,
@@ -1415,7 +1487,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     switch (type) {
       case 'photo':
         _telegramService.sendPhoto(
-          widget.chatId,
+          widget.realChatId,
           filePath,
           caption: caption.isNotEmpty ? caption : null,
           replyToMessageId: replyId,
@@ -1423,7 +1495,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         break;
       case 'video':
         _telegramService.sendVideo(
-          widget.chatId,
+          widget.realChatId,
           filePath,
           caption: caption.isNotEmpty ? caption : null,
           replyToMessageId: replyId,
@@ -1432,7 +1504,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       case 'audio':
       case 'document':
         _telegramService.sendDocument(
-          widget.chatId,
+          widget.realChatId,
           filePath,
           caption: caption.isNotEmpty ? caption : null,
           replyToMessageId: replyId,
@@ -1474,10 +1546,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         ).showSnackBar(SnackBar(content: Text('Microphone permission denied')));
       }
     } catch (e) {
-      print('Error starting recording: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to start recording: $e')));
+      ).showSnackBar(SnackBar(content: Text('Failed to start recording')));
     }
   }
 
@@ -1488,7 +1559,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
       if (send && path != null && _recordingDuration > 0) {
         await _telegramService.sendVoiceNote(
-          widget.chatId,
+          widget.realChatId,
           path,
           duration: _recordingDuration,
           replyToMessageId: _replyToMessage?.id,
@@ -1502,7 +1573,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         _recordingDuration = 0;
       });
     } catch (e) {
-      print('Error stopping recording: $e');
+      // Silently handle recording errors
     }
   }
 
@@ -1525,15 +1596,13 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       // Use system audio player via open_file
       final result = await OpenFile.open(path);
       if (result.type != ResultType.done) {
-        print('Error playing audio: ${result.message}');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not play audio: ${result.message}')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Could not play audio')));
         }
       }
     } catch (e) {
-      print('Error playing audio: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1600,10 +1669,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       try {
         await OpenFile.open(localPath);
       } catch (e) {
-        print('Error opening file: $e');
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Cannot open file: $e')));
+        ).showSnackBar(SnackBar(content: Text('Cannot open file')));
       }
     } else {
       _downloadMedia(message);
@@ -1616,7 +1684,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     try {
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (e) {
-      print('Error opening maps: $e');
+      // Silently handle maps error
     }
   }
 
@@ -1734,111 +1802,124 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     final isMe = message.isOutgoing;
     final hasMedia = message.mediaInfo != null;
     final mediaType = message.contentType;
+    final isHighlighted =
+        _highlightedMessageId == message.id && _highlightAnimating;
 
-    return GestureDetector(
-      onLongPress: () => _showMessageActions(message),
-      child: Padding(
-        padding: EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          mainAxisAlignment: isMe
-              ? MainAxisAlignment.end
-              : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (!isMe && isLast) SizedBox(width: 4),
-            if (!isMe && !isLast) SizedBox(width: 38),
-            Flexible(
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
-                ),
-                padding: hasMedia
-                    ? EdgeInsets.all(4)
-                    : EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isMe ? Color(0xFF2B5278) : greyColor,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(isMe ? 18 : (isLast ? 4 : 18)),
-                    topRight: Radius.circular(isMe ? (isLast ? 4 : 18) : 18),
-                    bottomLeft: Radius.circular(18),
-                    bottomRight: Radius.circular(18),
+    return AnimatedContainer(
+      duration: Duration(milliseconds: 500),
+      decoration: BoxDecoration(
+        color: isHighlighted
+            ? Color(0xFF37AEE2).withOpacity(0.3)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: GestureDetector(
+        onLongPress: () => _showMessageActions(message),
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            mainAxisAlignment: isMe
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!isMe && isLast) SizedBox(width: 4),
+              if (!isMe && !isLast) SizedBox(width: 38),
+              Flexible(
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.75,
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: isMe
-                      ? CrossAxisAlignment.end
-                      : CrossAxisAlignment.start,
-                  children: [
-                    // Show sender name for group chats (if not outgoing)
-                    if (!isMe &&
-                        message.senderName != null &&
-                        message.senderName!.isNotEmpty)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          bottom: 4,
-                          left: hasMedia ? 8 : 0,
-                        ),
-                        child: Text(
-                          message.senderName!,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: _getSenderColor(message.senderId),
-                            fontWeight: FontWeight.w600,
+                  padding: hasMedia
+                      ? EdgeInsets.all(4)
+                      : EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isMe ? Color(0xFF2B5278) : greyColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(isMe ? 18 : (isLast ? 4 : 18)),
+                      topRight: Radius.circular(isMe ? (isLast ? 4 : 18) : 18),
+                      bottomLeft: Radius.circular(18),
+                      bottomRight: Radius.circular(18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: isMe
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    children: [
+                      // Show sender name for group chats (if not outgoing)
+                      if (!isMe &&
+                          message.senderName != null &&
+                          message.senderName!.isNotEmpty)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: 4,
+                            left: hasMedia ? 8 : 0,
                           ),
-                        ),
-                      ),
-                    // Media content
-                    if (hasMedia) _buildMediaContent(message),
-                    // Message text (if any)
-                    if (!hasMedia ||
-                        (message.text.isNotEmpty &&
-                            !message.text.startsWith('📷') &&
-                            !message.text.startsWith('🎥') &&
-                            !message.text.startsWith('🎤') &&
-                            !message.text.startsWith('📎') &&
-                            !message.text.startsWith('📹') &&
-                            !message.text.startsWith('🎨')))
-                      Padding(
-                        padding: hasMedia ? EdgeInsets.all(8) : EdgeInsets.zero,
-                        child: Text(
-                          _getDisplayText(message),
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: white,
-                            height: 1.3,
-                          ),
-                        ),
-                      ),
-                    SizedBox(height: 4),
-                    // Time and status
-                    Padding(
-                      padding: hasMedia
-                          ? EdgeInsets.only(right: 8, bottom: 4)
-                          : EdgeInsets.zero,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            message.time,
+                          child: Text(
+                            message.senderName!,
                             style: TextStyle(
-                              fontSize: 12,
-                              color: white.withOpacity(0.6),
+                              fontSize: 13,
+                              color: _getSenderColor(message.senderId),
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (isMe) ...[
-                            SizedBox(width: 4),
-                            _buildMessageStatus(message.status),
+                        ),
+                      // Media content
+                      if (hasMedia) _buildMediaContent(message),
+                      // Message text (if any)
+                      if (!hasMedia ||
+                          (message.text.isNotEmpty &&
+                              !message.text.startsWith('📷') &&
+                              !message.text.startsWith('🎥') &&
+                              !message.text.startsWith('🎤') &&
+                              !message.text.startsWith('📎') &&
+                              !message.text.startsWith('📹') &&
+                              !message.text.startsWith('🎨')))
+                        Padding(
+                          padding: hasMedia
+                              ? EdgeInsets.all(8)
+                              : EdgeInsets.zero,
+                          child: Text(
+                            _getDisplayText(message),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: white,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      SizedBox(height: 4),
+                      // Time and status
+                      Padding(
+                        padding: hasMedia
+                            ? EdgeInsets.only(right: 8, bottom: 4)
+                            : EdgeInsets.zero,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              message.time,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: white.withOpacity(0.6),
+                              ),
+                            ),
+                            if (isMe) ...[
+                              SizedBox(width: 4),
+                              _buildMessageStatus(message.status),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (isMe && isLast) SizedBox(width: 4),
-            if (isMe && !isLast) SizedBox(width: 38),
-          ],
+              if (isMe && isLast) SizedBox(width: 4),
+              if (isMe && !isLast) SizedBox(width: 38),
+            ],
+          ),
         ),
       ),
     );
@@ -2008,7 +2089,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   }
 
   void _downloadMediaByFileId(int fileId) {
-    print('Downloading file: $fileId');
     _telegramService.downloadFileWithProgress(fileId);
   }
 
@@ -2062,7 +2142,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   Widget _buildInitials() {
     String initials = '';
-    final words = widget.name.split(' ');
+    final words = widget.chatName.split(' ');
     if (words.isNotEmpty) {
       initials = words[0].isNotEmpty ? words[0][0].toUpperCase() : '';
       if (words.length > 1 && words[1].isNotEmpty) {
