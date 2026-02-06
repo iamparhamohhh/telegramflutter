@@ -545,6 +545,37 @@ class TelegramService {
       } else if (type == 'storageStatistics') {
         // Storage statistics response
         _storageStatistics = json;
+      } else if (type == 'sessions') {
+        // Active sessions response
+        final sessionsList = json['sessions'] as List<dynamic>? ?? [];
+        _activeSessions = sessionsList
+            .map((s) => Map<String, dynamic>.from(s as Map))
+            .toList();
+        _sessionsController.add(_activeSessions);
+      } else if (type == 'accountTtl') {
+        // Account TTL response
+        _accountTtlDays = json['days'] as int? ?? 365;
+        _accountTtlController.add(_accountTtlDays);
+      } else if (type == 'userPrivacySettingRules') {
+        // Privacy setting rules response
+        final rules = json['rules'] as List<dynamic>? ?? [];
+        if (_pendingPrivacySetting != null && rules.isNotEmpty) {
+          final firstRule = rules.first as Map<String, dynamic>;
+          final ruleType = firstRule['@type'] as String? ?? '';
+          String value;
+          if (ruleType.contains('AllowAll')) {
+            value = 'everybody';
+          } else if (ruleType.contains('AllowContacts')) {
+            value = 'contacts';
+          } else if (ruleType.contains('RestrictAll')) {
+            value = 'nobody';
+          } else {
+            value = 'contacts';
+          }
+          _privacySettings[_pendingPrivacySetting!] = value;
+          _privacySettingsController.add(_privacySettings);
+          _pendingPrivacySetting = null;
+        }
       } else if (type == 'scopeNotificationSettings') {
         // Response to GetScopeNotificationSettings
         // We need to figure out which scope this was for from the context
@@ -3135,6 +3166,174 @@ class TelegramService {
         chatLimit: 100,
       ),
     );
+  }
+
+  // ─── Active Sessions Management ──────────────────────────────────────
+
+  final _sessionsController =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  Stream<List<Map<String, dynamic>>> get sessionsStream =>
+      _sessionsController.stream;
+  List<Map<String, dynamic>> _activeSessions = [];
+  List<Map<String, dynamic>> get activeSessions => _activeSessions;
+
+  /// Get all active sessions
+  Future<void> getActiveSessions() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const GetActiveSessions());
+  }
+
+  /// Terminate a specific session
+  Future<void> terminateSession(int sessionId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, TerminateSession(sessionId: sessionId));
+    // Refresh sessions list after terminating
+    Future.delayed(
+      const Duration(milliseconds: 500),
+      () => getActiveSessions(),
+    );
+  }
+
+  /// Terminate all other sessions
+  Future<void> terminateAllOtherSessions() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const TerminateAllOtherSessions());
+    Future.delayed(
+      const Duration(milliseconds: 500),
+      () => getActiveSessions(),
+    );
+  }
+
+  // ─── Account TTL Management ─────────────────────────────────────────
+
+  final _accountTtlController = StreamController<int>.broadcast();
+  Stream<int> get accountTtlStream => _accountTtlController.stream;
+  int _accountTtlDays = 365;
+  int get accountTtlDays => _accountTtlDays;
+
+  /// Get account self-destruct timer
+  Future<void> getAccountTtl() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const GetAccountTtl());
+  }
+
+  /// Set account self-destruct timer (in days)
+  Future<void> setAccountTtl(int days) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, SetAccountTtl(ttl: AccountTtl(days: days)));
+    _accountTtlDays = days;
+    _accountTtlController.add(days);
+  }
+
+  // ─── Privacy Settings Management ────────────────────────────────────
+
+  final _privacySettingsController =
+      StreamController<Map<String, String>>.broadcast();
+  Stream<Map<String, String>> get privacySettingsStream =>
+      _privacySettingsController.stream;
+  final Map<String, String> _privacySettings = {};
+  Map<String, String> get privacySettings => Map.unmodifiable(_privacySettings);
+  String? _pendingPrivacySetting;
+
+  /// Get privacy setting rules for a specific setting
+  Future<void> getPrivacySettingRules(String settingType) async {
+    if (_clientId == 0) return;
+    UserPrivacySetting setting;
+    switch (settingType) {
+      case 'phone':
+        setting = const UserPrivacySettingShowPhoneNumber();
+        break;
+      case 'lastSeen':
+        setting = const UserPrivacySettingShowStatus();
+        break;
+      case 'profilePhoto':
+        setting = const UserPrivacySettingShowProfilePhoto();
+        break;
+      case 'forwards':
+        setting = const UserPrivacySettingShowLinkInForwardedMessages();
+        break;
+      case 'calls':
+        setting = const UserPrivacySettingAllowCalls();
+        break;
+      case 'groups':
+        setting = const UserPrivacySettingAllowChatInvites();
+        break;
+      default:
+        return;
+    }
+    _pendingPrivacySetting = settingType;
+    tdSend(_clientId, GetUserPrivacySettingRules(setting: setting));
+  }
+
+  /// Set privacy setting rules
+  Future<void> setPrivacySettingRules(
+    String settingType,
+    String ruleType,
+  ) async {
+    if (_clientId == 0) return;
+    UserPrivacySetting setting;
+    switch (settingType) {
+      case 'phone':
+        setting = const UserPrivacySettingShowPhoneNumber();
+        break;
+      case 'lastSeen':
+        setting = const UserPrivacySettingShowStatus();
+        break;
+      case 'profilePhoto':
+        setting = const UserPrivacySettingShowProfilePhoto();
+        break;
+      case 'forwards':
+        setting = const UserPrivacySettingShowLinkInForwardedMessages();
+        break;
+      case 'calls':
+        setting = const UserPrivacySettingAllowCalls();
+        break;
+      case 'groups':
+        setting = const UserPrivacySettingAllowChatInvites();
+        break;
+      default:
+        return;
+    }
+
+    UserPrivacySettingRule rule;
+    switch (ruleType) {
+      case 'everybody':
+        rule = const UserPrivacySettingRuleAllowAll();
+        break;
+      case 'contacts':
+        rule = const UserPrivacySettingRuleAllowContacts();
+        break;
+      case 'nobody':
+        rule = const UserPrivacySettingRuleRestrictAll();
+        break;
+      default:
+        return;
+    }
+
+    tdSend(
+      _clientId,
+      SetUserPrivacySettingRules(
+        setting: setting,
+        rules: UserPrivacySettingRules(rules: [rule]),
+      ),
+    );
+    _privacySettings[settingType] = ruleType;
+    _privacySettingsController.add(_privacySettings);
+  }
+
+  /// Load all privacy settings at once
+  Future<void> loadAllPrivacySettings() async {
+    for (final s in [
+      'phone',
+      'lastSeen',
+      'profilePhoto',
+      'forwards',
+      'calls',
+      'groups',
+    ]) {
+      getPrivacySettingRules(s);
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
   }
 
   // ─── Notification Management ────────────────────────────────────────

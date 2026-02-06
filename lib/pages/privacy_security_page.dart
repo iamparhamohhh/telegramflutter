@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:line_icons/line_icons.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/pages/blocked_users_page.dart';
 import 'package:telegramflutter/pages/two_factor_auth_page.dart';
+import 'package:telegramflutter/pages/active_sessions_page.dart';
+import 'package:telegramflutter/pages/account_deletion_page.dart';
 
 /// Privacy and Security settings page
 class PrivacySecurityPage extends StatefulWidget {
@@ -16,7 +19,9 @@ class PrivacySecurityPage extends StatefulWidget {
 class _PrivacySecurityPageState extends State<PrivacySecurityPage> {
   final _telegramService = TelegramService();
   StreamSubscription? _passwordStateSub;
+  StreamSubscription? _privacySub;
   bool _has2FA = false;
+  Map<String, String> _privacySettings = {};
 
   @override
   void initState() {
@@ -28,148 +33,276 @@ class _PrivacySecurityPageState extends State<PrivacySecurityPage> {
         });
       }
     });
+    _privacySub = _telegramService.privacySettingsStream.listen((settings) {
+      if (mounted) {
+        setState(() => _privacySettings = Map.from(settings));
+      }
+    });
     _telegramService.getPasswordState();
+    _telegramService.loadAllPrivacySettings();
   }
 
   @override
   void dispose() {
     _passwordStateSub?.cancel();
+    _privacySub?.cancel();
     super.dispose();
+  }
+
+  String _privacyLabel(String? value) {
+    switch (value) {
+      case 'everybody':
+        return 'Everybody';
+      case 'contacts':
+        return 'My Contacts';
+      case 'nobody':
+        return 'Nobody';
+      default:
+        return 'Loading...';
+    }
+  }
+
+  void _showPrivacyPicker(String settingType, String title) {
+    final current = _privacySettings[settingType] ?? 'contacts';
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.onSurface.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: context.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            _buildPrivacyRadio('Everybody', 'everybody', current, settingType),
+            _buildPrivacyRadio('My Contacts', 'contacts', current, settingType),
+            _buildPrivacyRadio('Nobody', 'nobody', current, settingType),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrivacyRadio(
+    String label,
+    String value,
+    String current,
+    String settingType,
+  ) {
+    final isSelected = current == value;
+    return ListTile(
+      title: Text(label, style: TextStyle(color: context.onSurface)),
+      leading: Icon(
+        isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+        color: isSelected ? Colors.blue : context.onSurface.withOpacity(0.4),
+      ),
+      onTap: () {
+        _telegramService.setPrivacySettingRules(settingType, value);
+        Navigator.pop(context);
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: context.bg,
       appBar: AppBar(
-        backgroundColor: greyColor,
-        title: const Text(
+        backgroundColor: context.appBarBg,
+        title: Text(
           'Privacy and Security',
-          style: TextStyle(color: white),
+          style: TextStyle(color: context.onSurface),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        iconTheme: IconThemeData(color: context.onSurface),
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 16),
-            // Security section
+
+            // ─── Security Section ────────────────────────────────
             _buildSectionHeader('SECURITY'),
-            _buildSettingItem(
-              icon: Icons.lock,
-              color: Colors.green,
-              title: 'Two-Step Verification',
-              subtitle: _has2FA ? 'On' : 'Off',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const TwoFactorAuthPage()),
-              ).then((_) => _telegramService.getPasswordState()),
-            ),
-            _buildSettingItem(
-              icon: Icons.devices,
-              color: Colors.orange,
-              title: 'Active Sessions',
-              subtitle: 'Control your sessions on other devices',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Active sessions coming soon')),
-                );
-              },
-            ),
-            _buildSettingItem(
-              icon: Icons.timer,
-              color: Colors.purple,
-              title: 'Auto-Delete Messages',
-              subtitle: 'Off',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Auto-delete coming soon')),
-                );
-              },
-            ),
-
-            const SizedBox(height: 24),
-
-            // Privacy section
-            _buildSectionHeader('PRIVACY'),
-            _buildSettingItem(
-              icon: Icons.phone,
-              color: Colors.blue,
-              title: 'Phone Number',
-              subtitle: 'Who can see my phone number',
-              onTap: () {},
-            ),
-            _buildSettingItem(
-              icon: Icons.access_time,
-              color: Colors.teal,
-              title: 'Last Seen & Online',
-              subtitle: 'Who can see my last seen time',
-              onTap: () => _showLastSeenOptions(),
-            ),
-            _buildSettingItem(
-              icon: Icons.photo,
-              color: Colors.pink,
-              title: 'Profile Photos',
-              subtitle: 'Who can see my profile photos',
-              onTap: () {},
-            ),
-            _buildSettingItem(
-              icon: Icons.call,
-              color: Colors.green,
-              title: 'Calls',
-              subtitle: 'Who can call me',
-              onTap: () {},
-            ),
-            _buildSettingItem(
-              icon: Icons.forward,
-              color: Colors.amber,
-              title: 'Forwarded Messages',
-              subtitle: 'Who can add a link to my account',
-              onTap: () {},
-            ),
-            _buildSettingItem(
-              icon: Icons.group_add,
-              color: Colors.cyan,
-              title: 'Groups & Channels',
-              subtitle: 'Who can add me to groups',
-              onTap: () {},
-            ),
-
-            const SizedBox(height: 24),
-
-            // Blocked users
-            _buildSectionHeader('BLOCKED USERS'),
-            _buildSettingItem(
-              icon: Icons.block,
-              color: Colors.red,
-              title: 'Blocked Users',
-              subtitle: 'Manage blocked users',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BlockedUsersPage()),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: context.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildSettingItem(
+                    icon: LineIcons.lock,
+                    color: Colors.green,
+                    title: 'Two-Step Verification',
+                    subtitle: _has2FA ? 'On' : 'Off',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const TwoFactorAuthPage(),
+                      ),
+                    ).then((_) => _telegramService.getPasswordState()),
+                  ),
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.desktop,
+                    color: Colors.orange,
+                    title: 'Active Sessions',
+                    subtitle: 'Control your sessions on other devices',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ActiveSessionsPage(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
 
-            // Data privacy
-            _buildSectionHeader('DATA SETTINGS'),
-            _buildSettingItem(
-              icon: Icons.delete_forever,
-              color: Colors.red,
-              title: 'Delete My Account',
-              subtitle: 'If away for...',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Account deletion settings coming soon'),
+            // ─── Privacy Section ─────────────────────────────────
+            _buildSectionHeader('PRIVACY'),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: context.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildSettingItem(
+                    icon: LineIcons.phone,
+                    color: Colors.blue,
+                    title: 'Phone Number',
+                    subtitle: _privacyLabel(_privacySettings['phone']),
+                    onTap: () => _showPrivacyPicker(
+                      'phone',
+                      'Who can see my phone number',
+                    ),
                   ),
-                );
-              },
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.clock,
+                    color: Colors.teal,
+                    title: 'Last Seen & Online',
+                    subtitle: _privacyLabel(_privacySettings['lastSeen']),
+                    onTap: () => _showPrivacyPicker(
+                      'lastSeen',
+                      'Who can see my last seen',
+                    ),
+                  ),
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.userCircle,
+                    color: Colors.pink,
+                    title: 'Profile Photos',
+                    subtitle: _privacyLabel(_privacySettings['profilePhoto']),
+                    onTap: () => _showPrivacyPicker(
+                      'profilePhoto',
+                      'Who can see my profile photos',
+                    ),
+                  ),
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.phoneVolume,
+                    color: Colors.green,
+                    title: 'Calls',
+                    subtitle: _privacyLabel(_privacySettings['calls']),
+                    onTap: () => _showPrivacyPicker('calls', 'Who can call me'),
+                  ),
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.share,
+                    color: Colors.amber,
+                    title: 'Forwarded Messages',
+                    subtitle: _privacyLabel(_privacySettings['forwards']),
+                    onTap: () => _showPrivacyPicker(
+                      'forwards',
+                      'Who can add a link to my account',
+                    ),
+                  ),
+                  _buildDivider(),
+                  _buildSettingItem(
+                    icon: LineIcons.users,
+                    color: Colors.cyan,
+                    title: 'Groups & Channels',
+                    subtitle: _privacyLabel(_privacySettings['groups']),
+                    onTap: () => _showPrivacyPicker(
+                      'groups',
+                      'Who can add me to groups',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ─── Blocked Users ───────────────────────────────────
+            _buildSectionHeader('BLOCKED USERS'),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: context.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _buildSettingItem(
+                icon: LineIcons.ban,
+                color: Colors.red,
+                title: 'Blocked Users',
+                subtitle: 'Manage blocked users',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BlockedUsersPage()),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ─── Account ─────────────────────────────────────────
+            _buildSectionHeader('ACCOUNT'),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: context.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _buildSettingItem(
+                icon: LineIcons.exclamationTriangle,
+                color: Colors.red,
+                title: 'Delete My Account',
+                subtitle: 'Account self-destruct settings',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AccountDeletionPage(),
+                  ),
+                ),
+              ),
             ),
 
             const SizedBox(height: 40),
@@ -181,16 +314,24 @@ class _PrivacySecurityPageState extends State<PrivacySecurityPage> {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Text(
         title,
-        style: const TextStyle(
-          color: Color(0xFF37AEE2),
+        style: TextStyle(
+          color: context.onSurface.withOpacity(0.5),
           fontSize: 13,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.5,
         ),
       ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Divider(
+      height: 1,
+      indent: 56,
+      color: context.onSurface.withOpacity(0.1),
     );
   }
 
@@ -210,75 +351,26 @@ class _PrivacySecurityPageState extends State<PrivacySecurityPage> {
           color: color.withOpacity(0.15),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, color: color, size: 22),
+        child: Icon(icon, color: color, size: 20),
       ),
-      title: Text(title, style: const TextStyle(color: white, fontSize: 16)),
+      title: Text(
+        title,
+        style: TextStyle(color: context.onSurface, fontSize: 15),
+      ),
       subtitle: subtitle != null
           ? Text(
               subtitle,
-              style: TextStyle(color: white.withOpacity(0.5), fontSize: 13),
+              style: TextStyle(
+                color: context.onSurface.withOpacity(0.5),
+                fontSize: 13,
+              ),
             )
           : null,
-      trailing: Icon(Icons.chevron_right, color: white.withOpacity(0.3)),
-    );
-  }
-
-  void _showLastSeenOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: greyColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      trailing: Icon(
+        LineIcons.angleRight,
+        color: context.onSurface.withOpacity(0.3),
+        size: 16,
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: white.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Last Seen & Online',
-                style: TextStyle(
-                  color: white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Who can see your last seen time:',
-                style: TextStyle(color: white.withOpacity(0.6)),
-              ),
-            ),
-            const SizedBox(height: 8),
-            _buildRadioOption('Everybody', true),
-            _buildRadioOption('My Contacts', false),
-            _buildRadioOption('Nobody', false),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRadioOption(String label, bool selected) {
-    return ListTile(
-      title: Text(label, style: const TextStyle(color: white)),
-      trailing: selected
-          ? const Icon(Icons.check_circle, color: Color(0xFF37AEE2))
-          : Icon(Icons.circle_outlined, color: white.withOpacity(0.3)),
-      onTap: () => Navigator.pop(context),
     );
   }
 }
