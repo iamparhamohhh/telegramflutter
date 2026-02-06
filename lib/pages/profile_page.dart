@@ -457,9 +457,7 @@ class _ProfilePageState extends State<ProfilePage>
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Block user coming soon')),
-                    );
+                    _showBlockUserDialog();
                   },
                 ),
               ListTile(
@@ -479,6 +477,42 @@ class _ProfilePageState extends State<ProfilePage>
           ),
         );
       },
+    );
+  }
+
+  void _showBlockUserDialog() {
+    if (_userId == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: greyColor,
+        title: const Text('Block User', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Block ${widget.chatTitle}? They will not be able to contact you.',
+          style: TextStyle(color: Colors.white.withOpacity(0.8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.7)),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _telegramService.toggleBlockUser(_userId!, true);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${widget.chatTitle} blocked')),
+                );
+              }
+            },
+            child: const Text('Block', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -463,9 +463,113 @@ class TelegramService {
             nextFromMessageId,
           );
         }
+      } else if (type == 'passwordState') {
+        // 2FA password state response
+        _passwordState = json;
+        _passwordStateController.add(json);
+      } else if (type == 'messageSenders') {
+        // Blocked users list response
+        final senders = json['senders'] as List?;
+        _blockedUsers.clear();
+        if (senders != null) {
+          for (final sender in senders) {
+            final senderMap = sender as Map<String, dynamic>?;
+            final msgSender = senderMap?['sender'] as Map<String, dynamic>?;
+            if (msgSender != null &&
+                msgSender['@type'] == 'messageSenderUser') {
+              final userId = msgSender['user_id'] as int?;
+              if (userId != null) {
+                final user = _usersCache[userId];
+                _blockedUsers.add({
+                  'user_id': userId,
+                  'first_name': user?.firstName ?? '',
+                  'last_name': user?.lastName ?? '',
+                  'phone': user?.phoneNumber ?? '',
+                });
+              }
+            }
+          }
+        }
       } else if (type == 'storageStatistics') {
         // Storage statistics response
         _storageStatistics = json;
+      } else if (type == 'scopeNotificationSettings') {
+        // Response to GetScopeNotificationSettings
+        // We need to figure out which scope this was for from the context
+        final muteFor = json['mute_for'] as int? ?? 0;
+        final soundId = json['sound_id'] as int? ?? 0;
+        final showPreview = json['show_preview'] as bool? ?? true;
+        final disablePinned =
+            json['disable_pinned_message_notifications'] as bool? ?? false;
+        final disableMention =
+            json['disable_mention_notifications'] as bool? ?? false;
+        final muteStories = json['mute_stories'] as bool? ?? false;
+        final storySoundId = json['story_sound_id'] as int? ?? 0;
+        // Store as the last requested scope
+        if (_pendingNotifScope != null) {
+          _notificationSettings[_pendingNotifScope!] =
+              NotificationScopeSettings(
+                scope: _pendingNotifScope!,
+                isMuted: muteFor > 0,
+                showPreview: showPreview,
+                soundId: soundId,
+                disablePinnedMessageNotifications: disablePinned,
+                disableMentionNotifications: disableMention,
+                muteStories: muteStories,
+                storySoundId: storySoundId,
+              );
+          _notificationSettingsController.add(_notificationSettings);
+          _pendingNotifScope = null;
+        }
+      } else if (type == 'updateScopeNotificationSettings') {
+        // Scope notification settings changed
+        final scopeJson = json['scope'] as Map<String, dynamic>?;
+        final settingsJson =
+            json['notification_settings'] as Map<String, dynamic>?;
+        if (scopeJson != null && settingsJson != null) {
+          String scope;
+          switch (scopeJson['@type']) {
+            case 'notificationSettingsScopePrivateChats':
+              scope = 'private';
+              break;
+            case 'notificationSettingsScopeGroupChats':
+              scope = 'group';
+              break;
+            case 'notificationSettingsScopeChannelChats':
+              scope = 'channel';
+              break;
+            default:
+              scope = 'unknown';
+          }
+          _notificationSettings[scope] = NotificationScopeSettings(
+            scope: scope,
+            isMuted: (settingsJson['mute_for'] as int? ?? 0) > 0,
+            showPreview: settingsJson['show_preview'] as bool? ?? true,
+            soundId: settingsJson['sound_id'] as int? ?? 0,
+            disablePinnedMessageNotifications:
+                settingsJson['disable_pinned_message_notifications'] as bool? ??
+                false,
+            disableMentionNotifications:
+                settingsJson['disable_mention_notifications'] as bool? ?? false,
+            muteStories: settingsJson['mute_stories'] as bool? ?? false,
+            storySoundId: settingsJson['story_sound_id'] as int? ?? 0,
+          );
+          _notificationSettingsController.add(_notificationSettings);
+        }
+      } else if (type == 'notificationSounds') {
+        // Response to GetSavedNotificationSounds
+        final sounds = json['notification_sounds'] as List? ?? [];
+        _savedNotificationSounds = sounds
+            .map(
+              (s) => NotificationSoundInfo(
+                id: s['id'] as int? ?? 0,
+                title: s['title'] as String? ?? 'Unknown',
+                duration: s['duration'] as int? ?? 0,
+                data: s['data'] as String? ?? '',
+              ),
+            )
+            .toList();
+        _notificationSoundsController.add(_savedNotificationSounds);
       } else if (type == 'user' && json['is_me'] == true) {
         // Current user info
         _currentUserInfo = json;
@@ -1274,6 +1378,7 @@ class TelegramService {
     final chats = getChats();
     _debugPrint('Emitting ${chats.length} chats');
     _chatsController.add(chats);
+    _updateUnreadCount();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2297,18 +2402,6 @@ class TelegramService {
     return null;
   }
 
-  /// Get user photo local path
-  String? getUserPhotoPath(int userId) {
-    final user = _usersCache[userId];
-    if (user?.profilePhoto == null) return null;
-
-    final photo = user!.profilePhoto!;
-    if (photo.small.local.isDownloadingCompleted) {
-      return photo.small.local.path;
-    }
-    return null;
-  }
-
   /// Download a file with progress tracking
   Future<void> downloadFileWithProgress(int fileId, {int priority = 1}) async {
     if (_clientId == 0) return;
@@ -2920,33 +3013,236 @@ class TelegramService {
     );
   }
 
-  /// Set notification settings
-  Future<void> setNotificationSettings({
-    required bool muteFor,
-    int muteDuration = 0, // 0 = unmute, -1 = forever
+  // ─── Notification Management ────────────────────────────────────────
+
+  // Notification settings streams
+  final _notificationSettingsController =
+      StreamController<Map<String, NotificationScopeSettings>>.broadcast();
+  Stream<Map<String, NotificationScopeSettings>>
+  get notificationSettingsStream => _notificationSettingsController.stream;
+
+  // Cached notification settings per scope
+  final Map<String, NotificationScopeSettings> _notificationSettings = {};
+
+  // Pending scope for correlating response
+  String? _pendingNotifScope;
+
+  // Notification sounds
+  final _notificationSoundsController =
+      StreamController<List<NotificationSoundInfo>>.broadcast();
+  Stream<List<NotificationSoundInfo>> get notificationSoundsStream =>
+      _notificationSoundsController.stream;
+  List<NotificationSoundInfo> _savedNotificationSounds = [];
+  List<NotificationSoundInfo> get savedNotificationSounds =>
+      _savedNotificationSounds;
+
+  // Total unread count stream
+  final _unreadCountController = StreamController<int>.broadcast();
+  Stream<int> get unreadCountStream => _unreadCountController.stream;
+  int _totalUnreadCount = 0;
+  int get totalUnreadCount => _totalUnreadCount;
+
+  /// Calculate total unread count from all chats
+  int _computeTotalUnread() {
+    int total = 0;
+    for (final chat in _chatsCache.values) {
+      total += chat.unreadCount;
+    }
+    for (final entry in _rawChatData.entries) {
+      if (!_chatsCache.containsKey(entry.key)) {
+        total += (entry.value['unread_count'] as int?) ?? 0;
+      }
+    }
+    return total;
+  }
+
+  /// Update and emit total unread count
+  void _updateUnreadCount() {
+    _totalUnreadCount = _computeTotalUnread();
+    _unreadCountController.add(_totalUnreadCount);
+  }
+
+  /// Get notification settings for a scope
+  Future<NotificationScopeSettings?> getScopeNotificationSettings(
+    String scope,
+  ) async {
+    if (_clientId == 0) return null;
+
+    NotificationSettingsScope tdScope;
+    switch (scope) {
+      case 'private':
+        tdScope = const NotificationSettingsScopePrivateChats();
+        break;
+      case 'group':
+        tdScope = const NotificationSettingsScopeGroupChats();
+        break;
+      case 'channel':
+        tdScope = const NotificationSettingsScopeChannelChats();
+        break;
+      default:
+        return null;
+    }
+
+    _pendingNotifScope = scope;
+    tdSend(_clientId, GetScopeNotificationSettings(scope: tdScope));
+    return _notificationSettings[scope];
+  }
+
+  /// Load all notification settings
+  Future<void> loadAllNotificationSettings() async {
+    if (_clientId == 0) return;
+    await getScopeNotificationSettings('private');
+    await getScopeNotificationSettings('group');
+    await getScopeNotificationSettings('channel');
+  }
+
+  /// Set notification settings for a scope
+  Future<void> setScopeNotificationSettings({
+    required String scope,
+    required bool muted,
+    bool showPreview = true,
+    int soundId = 0,
+    bool disablePinnedMessageNotifications = false,
+    bool disableMentionNotifications = false,
+    bool muteStories = false,
+    int storySoundId = 0,
   }) async {
     if (_clientId == 0) return;
 
-    // For all private chats
+    NotificationSettingsScope tdScope;
+    switch (scope) {
+      case 'private':
+        tdScope = const NotificationSettingsScopePrivateChats();
+        break;
+      case 'group':
+        tdScope = const NotificationSettingsScopeGroupChats();
+        break;
+      case 'channel':
+        tdScope = const NotificationSettingsScopeChannelChats();
+        break;
+      default:
+        return;
+    }
+
     tdSend(
       _clientId,
       SetScopeNotificationSettings(
-        scope: const NotificationSettingsScopePrivateChats(),
+        scope: tdScope,
         notificationSettings: ScopeNotificationSettings(
-          muteFor: muteFor
-              ? (muteDuration == -1 ? 2147483647 : muteDuration)
-              : 0,
+          muteFor: muted ? 2147483647 : 0,
+          soundId: soundId,
+          showPreview: showPreview,
+          useDefaultMuteStories: false,
+          muteStories: muteStories,
+          storySoundId: storySoundId,
+          showStorySender: true,
+          disablePinnedMessageNotifications: disablePinnedMessageNotifications,
+          disableMentionNotifications: disableMentionNotifications,
+        ),
+      ),
+    );
+
+    // Update local cache
+    _notificationSettings[scope] = NotificationScopeSettings(
+      scope: scope,
+      isMuted: muted,
+      showPreview: showPreview,
+      soundId: soundId,
+      disablePinnedMessageNotifications: disablePinnedMessageNotifications,
+      disableMentionNotifications: disableMentionNotifications,
+      muteStories: muteStories,
+      storySoundId: storySoundId,
+    );
+    _notificationSettingsController.add(_notificationSettings);
+  }
+
+  /// Set chat-specific notification settings with full control
+  Future<void> setChatNotificationSettings({
+    required int chatId,
+    bool? muted,
+    bool? showPreview,
+    int? soundId,
+    bool? disablePinnedMessageNotifications,
+    bool? disableMentionNotifications,
+    bool? muteStories,
+    int? storySoundId,
+  }) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      SetChatNotificationSettings(
+        chatId: chatId,
+        notificationSettings: ChatNotificationSettings(
+          useDefaultMuteFor: muted == null,
+          muteFor: muted == true ? 2147483647 : 0,
+          useDefaultSound: soundId == null,
+          soundId: soundId ?? 0,
+          useDefaultShowPreview: showPreview == null,
+          showPreview: showPreview ?? true,
+          useDefaultMuteStories: muteStories == null,
+          muteStories: muteStories ?? false,
+          useDefaultStorySound: storySoundId == null,
+          storySoundId: storySoundId ?? 0,
+          useDefaultShowStorySender: true,
+          showStorySender: true,
+          useDefaultDisablePinnedMessageNotifications:
+              disablePinnedMessageNotifications == null,
+          disablePinnedMessageNotifications:
+              disablePinnedMessageNotifications ?? false,
+          useDefaultDisableMentionNotifications:
+              disableMentionNotifications == null,
+          disableMentionNotifications: disableMentionNotifications ?? false,
+        ),
+      ),
+    );
+  }
+
+  /// Reset a chat to use default notification settings
+  Future<void> resetChatNotificationSettings(int chatId) async {
+    if (_clientId == 0) return;
+
+    tdSend(
+      _clientId,
+      SetChatNotificationSettings(
+        chatId: chatId,
+        notificationSettings: const ChatNotificationSettings(
+          useDefaultMuteFor: true,
+          muteFor: 0,
+          useDefaultSound: true,
           soundId: 0,
+          useDefaultShowPreview: true,
           showPreview: true,
           useDefaultMuteStories: true,
           muteStories: false,
+          useDefaultStorySound: true,
           storySoundId: 0,
+          useDefaultShowStorySender: true,
           showStorySender: true,
+          useDefaultDisablePinnedMessageNotifications: true,
           disablePinnedMessageNotifications: false,
+          useDefaultDisableMentionNotifications: true,
           disableMentionNotifications: false,
         ),
       ),
     );
+  }
+
+  /// Get available notification sounds
+  Future<void> getNotificationSounds() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const GetSavedNotificationSounds());
+  }
+
+  /// Mark all chats as read
+  Future<void> markAllChatsAsRead() async {
+    if (_clientId == 0) return;
+    // Individually mark each chat with unread as read
+    for (final chat in _chatsCache.values) {
+      if (chat.unreadCount > 0) {
+        markChatAsRead(chat.id);
+      }
+    }
   }
 
   /// Pin/unpin a chat
@@ -3041,6 +3337,182 @@ class TelegramService {
         isBlocked: block,
       ),
     );
+  }
+
+  /// Get blocked users list
+  Future<List<Map<String, dynamic>>> getBlockedUsers({
+    int offset = 0,
+    int limit = 50,
+  }) async {
+    if (_clientId == 0) return [];
+    tdSend(_clientId, GetBlockedMessageSenders(offset: offset, limit: limit));
+    // Wait for response
+    await Future.delayed(const Duration(milliseconds: 500));
+    return _blockedUsers;
+  }
+
+  final List<Map<String, dynamic>> _blockedUsers = [];
+
+  /// Import phone contacts to Telegram
+  Future<void> importContacts(List<Map<String, String>> phoneContacts) async {
+    if (_clientId == 0) return;
+    final contacts = phoneContacts
+        .map(
+          (c) => Contact(
+            phoneNumber: c['phone'] ?? '',
+            firstName: c['firstName'] ?? '',
+            lastName: c['lastName'] ?? '',
+            vcard: '',
+            userId: 0,
+          ),
+        )
+        .toList();
+
+    tdSend(_clientId, ImportContacts(contacts: contacts));
+    // Reload contacts after import
+    await Future.delayed(const Duration(milliseconds: 500));
+    await loadContacts();
+  }
+
+  /// Add a single contact
+  Future<void> addContact({
+    required String phoneNumber,
+    required String firstName,
+    String lastName = '',
+  }) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      AddContact(
+        contact: Contact(
+          phoneNumber: phoneNumber,
+          firstName: firstName,
+          lastName: lastName,
+          vcard: '',
+          userId: 0,
+        ),
+        sharePhoneNumber: false,
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 500));
+    await loadContacts();
+  }
+
+  /// Remove a contact
+  Future<void> removeContact(int userId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, RemoveContacts(userIds: [userId]));
+    await Future.delayed(const Duration(milliseconds: 300));
+    await loadContacts();
+  }
+
+  /// Get user's full info (bio, etc.) - synchronous from cache
+  Map<String, dynamic>? getUserFullInfo(int userId) {
+    return _userFullInfoCache[userId];
+  }
+
+  /// Set username
+  Future<void> setUsername(String username) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, SetUsername(username: username));
+  }
+
+  /// Set phone number (for changing phone)
+  Future<void> changePhoneNumber(String newPhoneNumber) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetAuthenticationPhoneNumber(
+        phoneNumber: newPhoneNumber,
+        settings: const PhoneNumberAuthenticationSettings(
+          allowFlashCall: false,
+          allowMissedCall: false,
+          isCurrentPhoneNumber: false,
+          allowSmsRetrieverApi: false,
+          authenticationTokens: [],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2FA (Two-Step Verification) MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Stream for 2FA state
+  final _passwordStateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get passwordStateStream =>
+      _passwordStateController.stream;
+  Map<String, dynamic>? _passwordState;
+  Map<String, dynamic>? get passwordState => _passwordState;
+
+  /// Get current 2FA password state
+  Future<void> getPasswordState() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, const GetPasswordState());
+  }
+
+  /// Set a new 2FA password
+  Future<void> setPassword({
+    required String newPassword,
+    String? newHint,
+    String? newRecoveryEmail,
+    String oldPassword = '',
+  }) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetPassword(
+        oldPassword: oldPassword,
+        newPassword: newPassword,
+        newHint: newHint ?? '',
+        setRecoveryEmailAddress: newRecoveryEmail != null,
+        newRecoveryEmailAddress: newRecoveryEmail ?? '',
+      ),
+    );
+  }
+
+  /// Remove 2FA password
+  Future<void> removePassword(String currentPassword) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetPassword(
+        oldPassword: currentPassword,
+        newPassword: '',
+        newHint: '',
+        setRecoveryEmailAddress: false,
+        newRecoveryEmailAddress: '',
+      ),
+    );
+  }
+
+  /// Set recovery email for 2FA
+  Future<void> setRecoveryEmail(String password, String email) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetRecoveryEmailAddress(
+        password: password,
+        newRecoveryEmailAddress: email,
+      ),
+    );
+  }
+
+  /// Get user photo path from cache
+  String? getUserPhotoPath(int userId) {
+    final user = _usersCache[userId];
+    if (user?.profilePhoto == null) return null;
+    final photo = user!.profilePhoto!;
+    if (photo.small.local.isDownloadingCompleted) {
+      return photo.small.local.path;
+    }
+    // Start download if needed
+    if (!photo.small.local.isDownloadingActive) {
+      _downloadFile(photo.small.id);
+    }
+    return null;
   }
 
   /// Get reply info for a message (for display purposes)
@@ -4154,5 +4626,43 @@ class FileDownloadState {
     required this.progress,
     this.localPath,
     this.error,
+  });
+}
+
+/// Notification settings for a specific scope (private/group/channel)
+class NotificationScopeSettings {
+  final String scope;
+  final bool isMuted;
+  final bool showPreview;
+  final int soundId;
+  final bool disablePinnedMessageNotifications;
+  final bool disableMentionNotifications;
+  final bool muteStories;
+  final int storySoundId;
+
+  NotificationScopeSettings({
+    required this.scope,
+    this.isMuted = false,
+    this.showPreview = true,
+    this.soundId = 0,
+    this.disablePinnedMessageNotifications = false,
+    this.disableMentionNotifications = false,
+    this.muteStories = false,
+    this.storySoundId = 0,
+  });
+}
+
+/// Info about a saved notification sound
+class NotificationSoundInfo {
+  final int id;
+  final String title;
+  final int duration;
+  final String data;
+
+  NotificationSoundInfo({
+    required this.id,
+    required this.title,
+    this.duration = 0,
+    this.data = '',
   });
 }

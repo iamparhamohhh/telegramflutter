@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/pages/login_page.dart';
+import 'package:telegramflutter/pages/my_profile_page.dart';
+import 'package:telegramflutter/pages/edit_profile_page.dart';
+import 'package:telegramflutter/pages/privacy_security_page.dart';
+import 'package:telegramflutter/pages/notification_settings_page.dart';
 
 class SettingPage extends StatefulWidget {
   const SettingPage({super.key});
@@ -96,15 +100,12 @@ class _SettingPageState extends State<SettingPage> {
   }
 
   void _editProfile() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: greyColor,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => _buildEditProfileSheet(),
-    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EditProfilePage()),
+    ).then((result) {
+      if (result == true) _loadUserData();
+    });
   }
 
   Widget _buildEditProfileSheet() {
@@ -254,9 +255,9 @@ class _SettingPageState extends State<SettingPage> {
           // Profile photo
           GestureDetector(
             onTap: () {
-              // TODO: Change profile photo
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Change photo coming soon')),
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MyProfilePage()),
               );
             },
             child: Stack(
@@ -348,7 +349,10 @@ class _SettingPageState extends State<SettingPage> {
             icon: Icons.lock_outline,
             color: Colors.grey,
             title: 'Privacy and Security',
-            onTap: () {},
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PrivacySecurityPage()),
+            ),
           ),
           _buildSettingItem(
             icon: Icons.storage_outlined,
@@ -467,78 +471,9 @@ class _SettingPageState extends State<SettingPage> {
   }
 
   void _showNotificationSettings() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: greyColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: EdgeInsets.only(top: 8),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: white.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Notifications',
-                style: TextStyle(
-                  color: white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            SwitchListTile(
-              title: Text(
-                'Message Notifications',
-                style: TextStyle(color: white),
-              ),
-              subtitle: Text(
-                'Show notifications for new messages',
-                style: TextStyle(color: white.withOpacity(0.6)),
-              ),
-              value: true,
-              activeColor: Color(0xFF37AEE2),
-              onChanged: (value) {
-                // TODO: Implement notification toggle
-              },
-            ),
-            SwitchListTile(
-              title: Text(
-                'Group Notifications',
-                style: TextStyle(color: white),
-              ),
-              subtitle: Text(
-                'Show notifications for group messages',
-                style: TextStyle(color: white.withOpacity(0.6)),
-              ),
-              value: true,
-              activeColor: Color(0xFF37AEE2),
-              onChanged: (value) {
-                // TODO: Implement notification toggle
-              },
-            ),
-            SwitchListTile(
-              title: Text('Sound', style: TextStyle(color: white)),
-              value: true,
-              activeColor: Color(0xFF37AEE2),
-              onChanged: (value) {
-                // TODO: Implement sound toggle
-              },
-            ),
-            SizedBox(height: 16),
-          ],
-        ),
-      ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationSettingsPage()),
     );
   }
 

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:badges/badges.dart' as badges;
 import 'package:flutter/material.dart';
 import 'package:telegramflutter/pages/chats_page.dart';
-import 'package:telegramflutter/pages/contact_page.dart';
+import 'package:telegramflutter/pages/contacts_page.dart';
 import 'package:telegramflutter/pages/setting_page.dart';
+import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 
 class RootApp extends StatefulWidget {
@@ -14,6 +17,25 @@ class RootApp extends StatefulWidget {
 
 class _RootAppState extends State<RootApp> {
   int _pageIndex = 0;
+  final TelegramService _telegramService = TelegramService();
+  StreamSubscription<int>? _unreadSub;
+  int _totalUnread = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _totalUnread = _telegramService.totalUnreadCount;
+    _unreadSub = _telegramService.unreadCountStream.listen((count) {
+      if (mounted) setState(() => _totalUnread = count);
+    });
+  }
+
+  @override
+  void dispose() {
+    _unreadSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -26,7 +48,7 @@ class _RootAppState extends State<RootApp> {
   Widget getBody() {
     return IndexedStack(
       index: _pageIndex,
-      children: const [ContactPage(), ChatPage(), SettingPage()],
+      children: const [ContactsPage(), ChatPage(), SettingPage()],
     );
   }
 
@@ -56,11 +78,11 @@ class _RootAppState extends State<RootApp> {
               },
               child: Column(
                 children: [
-                  if (index == 1)
+                  if (index == 1 && _totalUnread > 0)
                     badges.Badge(
-                      badgeContent: const Text(
-                        '3',
-                        style: TextStyle(color: white),
+                      badgeContent: Text(
+                        _totalUnread > 99 ? '99+' : _totalUnread.toString(),
+                        style: const TextStyle(color: white, fontSize: 10),
                       ),
                       child: Icon(
                         iconItems[index],
