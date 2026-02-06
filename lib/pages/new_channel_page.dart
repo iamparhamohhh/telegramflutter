@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/telegram_service.dart';
 import '../theme/colors.dart';
-import 'chat_detail_page.dart';
+//import 'chat_detail_page.dart';
 
 class NewChannelPage extends StatefulWidget {
   const NewChannelPage({super.key});

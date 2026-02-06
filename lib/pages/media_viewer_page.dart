@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
-import 'package:open_file/open_file.dart';
+//import 'package:open_file/open_file.dart';
 
 /// Full-screen photo viewer with zoom and pan
 class PhotoViewerPage extends StatefulWidget {

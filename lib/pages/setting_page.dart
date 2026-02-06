@@ -66,7 +66,7 @@ class _SettingPageState extends State<SettingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: context.bg,
       appBar: PreferredSize(
         child: getAppBar(),
         preferredSize: Size.fromHeight(60),
@@ -80,8 +80,8 @@ class _SettingPageState extends State<SettingPage> {
   getAppBar() {
     return AppBar(
       elevation: 0,
-      backgroundColor: greyColor,
-      title: Text('Settings', style: TextStyle(color: white)),
+      backgroundColor: context.appBarBg,
+      title: Text('Settings', style: TextStyle(color: context.appBarText)),
       centerTitle: true,
       actions: [
         TextButton(
@@ -370,6 +370,24 @@ class _SettingPageState extends State<SettingPage> {
             onTap: () {},
           ),
           _buildSettingItem(
+            icon: Icons.brightness_6,
+            color: Colors.amber,
+            title: 'Appearance',
+            subtitle: AppTheme().isDark ? 'Dark Mode' : 'Light Mode',
+            trailing: Switch(
+              value: AppTheme().isDark,
+              onChanged: (val) {
+                AppTheme().toggleTheme();
+                setState(() {});
+              },
+              activeColor: Color(0xFF37AEE2),
+            ),
+            onTap: () {
+              AppTheme().toggleTheme();
+              setState(() {});
+            },
+          ),
+          _buildSettingItem(
             icon: Icons.devices_outlined,
             color: Colors.orange,
             title: 'Devices',
@@ -441,6 +459,7 @@ class _SettingPageState extends State<SettingPage> {
     required String title,
     String? subtitle,
     Color? textColor,
+    Widget? trailing,
     required VoidCallback onTap,
   }) {
     return ListTile(
@@ -456,17 +475,19 @@ class _SettingPageState extends State<SettingPage> {
       ),
       title: Text(
         title,
-        style: TextStyle(color: textColor ?? white, fontSize: 16),
+        style: TextStyle(color: textColor ?? context.onSurface, fontSize: 16),
       ),
       subtitle: subtitle != null
           ? Text(
               subtitle,
-              style: TextStyle(color: white.withOpacity(0.5), fontSize: 14),
+              style: TextStyle(color: context.onSurfaceSecondary, fontSize: 14),
             )
           : null,
-      trailing: textColor == null
-          ? Icon(Icons.chevron_right, color: white.withOpacity(0.3))
-          : null,
+      trailing:
+          trailing ??
+          (textColor == null
+              ? Icon(Icons.chevron_right, color: context.onSurfaceSecondary)
+              : null),
     );
   }
 

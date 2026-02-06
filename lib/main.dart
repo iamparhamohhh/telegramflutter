@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:telegramflutter/pages/login_page.dart';
+import 'package:telegramflutter/theme/colors.dart';
 
 void main() {
   runApp(const TelegramApp());
@@ -10,11 +11,19 @@ class TelegramApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Telegram Flutter',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
-      home: const LoginPage(),
+    final appTheme = AppTheme();
+    return ListenableBuilder(
+      listenable: appTheme,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Telegram Flutter',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: appTheme.themeMode,
+          home: const LoginPage(),
+        );
+      },
     );
   }
 }

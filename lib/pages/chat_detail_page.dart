@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/pages/profile_page.dart';
@@ -11,7 +12,7 @@ import 'package:telegramflutter/models/user_profile.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+//import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -56,12 +57,15 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   List<TelegramMessage> _messages = [];
   StreamSubscription<List<TelegramMessage>>? _messagesSubscription;
   StreamSubscription<FileDownloadProgress>? _fileProgressSubscription;
+  StreamSubscription<Map<int, Map<int, String>>>? _typingSubscription;
   bool _isLoading = true;
   bool _isSending = false;
   bool _isLoadingMore = false;
   bool _hasMoreMessages = true;
   String _statusText = 'last seen recently';
   bool _isOnline = false;
+  String _typingText = '';
+  final FocusNode _messageFocusNode = FocusNode();
 
   // Reply state
   TelegramMessage? _replyToMessage;
@@ -88,6 +92,14 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     _highlightedMessageId = widget.highlightMessageId;
     _loadMessages();
     _loadStatus();
+
+    // Subscribe to typing indicators
+    _typingSubscription = _telegramService.typingStream.listen((typing) {
+      if (mounted) {
+        final text = _telegramService.getTypingText(widget.realChatId) ?? '';
+        setState(() => _typingText = text);
+      }
+    });
 
     // Subscribe to file download progress
     _fileProgressSubscription = _telegramService.fileDownloadProgressStream
@@ -155,11 +167,15 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   void dispose() {
     _messagesSubscription?.cancel();
     _fileProgressSubscription?.cancel();
+    _typingSubscription?.cancel();
     _messageController.dispose();
+    _messageFocusNode.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
+    // Cancel typing when leaving chat
+    _telegramService.cancelTypingAction(widget.realChatId);
     super.dispose();
   }
 
@@ -277,6 +293,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     });
 
     _messageController.clear();
+    _telegramService.cancelTypingAction(widget.realChatId);
 
     try {
       if (_editingMessage != null) {
@@ -357,9 +374,10 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   }
 
   void _showMessageActions(TelegramMessage message) {
+    HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
-      backgroundColor: greyColor,
+      backgroundColor: context.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -372,15 +390,15 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: white.withOpacity(0.3),
+                color: context.onSurfaceSecondary,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             SizedBox(height: 16),
             // Reply
             ListTile(
-              leading: Icon(Icons.reply, color: white),
-              title: Text('Reply', style: TextStyle(color: white)),
+              leading: Icon(Icons.reply, color: context.onSurface),
+              title: Text('Reply', style: TextStyle(color: context.onSurface)),
               onTap: () {
                 Navigator.pop(context);
                 _replyTo(message);
@@ -388,8 +406,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             ),
             // Copy
             ListTile(
-              leading: Icon(Icons.copy, color: white),
-              title: Text('Copy', style: TextStyle(color: white)),
+              leading: Icon(Icons.copy, color: context.onSurface),
+              title: Text('Copy', style: TextStyle(color: context.onSurface)),
               onTap: () {
                 Navigator.pop(context);
                 // Copy to clipboard
@@ -402,8 +420,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             ),
             // Forward
             ListTile(
-              leading: Icon(Icons.forward, color: white),
-              title: Text('Forward', style: TextStyle(color: white)),
+              leading: Icon(Icons.forward, color: context.onSurface),
+              title: Text(
+                'Forward',
+                style: TextStyle(color: context.onSurface),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _showForwardDialog(message);
@@ -412,8 +433,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             // Edit (only for own messages with text)
             if (message.isOutgoing && message.text.isNotEmpty)
               ListTile(
-                leading: Icon(Icons.edit, color: white),
-                title: Text('Edit', style: TextStyle(color: white)),
+                leading: Icon(Icons.edit, color: context.onSurface),
+                title: Text('Edit', style: TextStyle(color: context.onSurface)),
                 onTap: () {
                   Navigator.pop(context);
                   _editMessage(message);
@@ -589,17 +610,20 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: bgColor,
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        child: getAppBar(),
-      ),
-      body: Column(
-        children: [
-          Expanded(child: getBody()),
-          getBottomBar(),
-        ],
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        backgroundColor: context.bg,
+        appBar: PreferredSize(
+          preferredSize: Size.fromHeight(60),
+          child: getAppBar(),
+        ),
+        body: Column(
+          children: [
+            Expanded(child: getBody()),
+            getBottomBar(),
+          ],
+        ),
       ),
     );
   }
@@ -607,13 +631,13 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   Widget getAppBar() {
     return AppBar(
       elevation: 0.5,
-      backgroundColor: greyColor,
+      backgroundColor: context.appBarBg,
       shadowColor: Colors.black.withOpacity(0.2),
       leading: IconButton(
         onPressed: () {
           Navigator.pop(context);
         },
-        icon: Icon(Icons.arrow_back, color: white, size: 26),
+        icon: Icon(Icons.arrow_back, color: context.appBarText, size: 26),
       ),
       title: GestureDetector(
         onTap: () {
@@ -678,7 +702,10 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                           decoration: BoxDecoration(
                             color: Colors.green,
                             shape: BoxShape.circle,
-                            border: Border.all(color: greyColor, width: 2),
+                            border: Border.all(
+                              color: context.appBarBg,
+                              width: 2,
+                            ),
                           ),
                         ),
                       ),
@@ -694,22 +721,31 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                 children: [
                   Text(
                     widget.chatName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
-                      color: white,
+                      color: context.appBarText,
                       fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
-                    _statusText,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _isOnline
-                          ? Colors.lightBlueAccent
-                          : white.withOpacity(0.6),
-                    ),
-                  ),
+                  _typingText.isNotEmpty
+                      ? Text(
+                          _typingText,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF6DD0F5),
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      : Text(
+                          _statusText,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: _isOnline
+                                ? Colors.lightBlueAccent
+                                : context.appBarText.withOpacity(0.6),
+                          ),
+                        ),
                 ],
               ),
             ),
@@ -730,17 +766,29 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               ),
             );
           },
-          icon: Icon(Icons.search, color: white.withOpacity(0.8), size: 24),
+          icon: Icon(
+            Icons.search,
+            color: context.appBarText.withOpacity(0.8),
+            size: 24,
+          ),
           tooltip: 'Search in chat',
         ),
         IconButton(
           onPressed: () {},
-          icon: Icon(Icons.call, color: white.withOpacity(0.8), size: 24),
+          icon: Icon(
+            Icons.call,
+            color: context.appBarText.withOpacity(0.8),
+            size: 24,
+          ),
           tooltip: 'Call',
         ),
         IconButton(
           onPressed: () {},
-          icon: Icon(Icons.more_vert, color: white.withOpacity(0.8), size: 24),
+          icon: Icon(
+            Icons.more_vert,
+            color: context.appBarText.withOpacity(0.8),
+            size: 24,
+          ),
           tooltip: 'More',
         ),
       ],
@@ -754,7 +802,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
     return Container(
       decoration: BoxDecoration(
-        color: greyColor,
+        color: context.surface,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
@@ -772,7 +820,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: bgColor,
+                  color: context.bg,
                   border: Border(
                     left: BorderSide(
                       color: isEditing ? Colors.orange : Color(0xFF37AEE2),
@@ -812,7 +860,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: white.withOpacity(0.7),
+                              color: context.onSurfaceSecondary,
                               fontSize: 14,
                             ),
                           ),
@@ -821,7 +869,10 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                     ),
                     IconButton(
                       onPressed: isEditing ? _cancelEdit : _cancelReply,
-                      icon: Icon(Icons.close, color: white.withOpacity(0.7)),
+                      icon: Icon(
+                        Icons.close,
+                        color: context.onSurfaceSecondary,
+                      ),
                       iconSize: 20,
                       padding: EdgeInsets.zero,
                       constraints: BoxConstraints(minWidth: 32, minHeight: 32),
@@ -840,7 +891,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                     onPressed: _showAttachmentPicker,
                     icon: Icon(
                       Icons.add_circle_outline,
-                      color: white.withOpacity(0.7),
+                      color: context.onSurfaceSecondary,
                       size: 28,
                     ),
                     padding: EdgeInsets.all(8),
@@ -853,7 +904,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                         maxHeight: 120,
                       ),
                       decoration: BoxDecoration(
-                        color: textfieldColor,
+                        color: context.fieldColor,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -865,13 +916,27 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                               ),
                               child: TextField(
                                 controller: _messageController,
+                                focusNode: _messageFocusNode,
                                 maxLines: null,
                                 keyboardType: TextInputType.multiline,
                                 textInputAction: TextInputAction.newline,
-                                style: TextStyle(color: white, fontSize: 16),
+                                style: TextStyle(
+                                  color: context.onSurface,
+                                  fontSize: 16,
+                                ),
                                 cursorColor: Color(0xFF37AEE2),
                                 onChanged: (text) {
                                   setState(() {}); // Update send button icon
+                                  // Send typing action (debounced)
+                                  if (text.trim().isNotEmpty) {
+                                    _telegramService.sendTypingAction(
+                                      widget.realChatId,
+                                    );
+                                  } else {
+                                    _telegramService.cancelTypingAction(
+                                      widget.realChatId,
+                                    );
+                                  }
                                 },
                                 decoration: InputDecoration(
                                   border: InputBorder.none,
@@ -879,7 +944,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                                       ? 'Edit message...'
                                       : 'Message',
                                   hintStyle: TextStyle(
-                                    color: white.withOpacity(0.5),
+                                    color: context.onSurfaceSecondary,
                                     fontSize: 16,
                                   ),
                                   contentPadding: EdgeInsets.symmetric(
@@ -894,7 +959,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                             onPressed: () {},
                             icon: Icon(
                               Icons.emoji_emotions_outlined,
-                              color: white.withOpacity(0.7),
+                              color: context.onSurfaceSecondary,
                               size: 24,
                             ),
                             padding: EdgeInsets.all(8),
@@ -1734,7 +1799,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             SizedBox(height: 16),
             Text(
               'Loading messages...',
-              style: TextStyle(color: white.withOpacity(0.6)),
+              style: TextStyle(color: context.onSurfaceSecondary),
             ),
           ],
         ),
@@ -1749,52 +1814,172 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             Icon(
               Icons.chat_bubble_outline,
               size: 64,
-              color: white.withOpacity(0.3),
+              color: context.onSurfaceSecondary,
             ),
             SizedBox(height: 16),
             Text(
               'No messages yet',
-              style: TextStyle(color: white.withOpacity(0.6), fontSize: 16),
+              style: TextStyle(color: context.onSurfaceSecondary, fontSize: 16),
             ),
             SizedBox(height: 8),
             Text(
               'Send a message to start the conversation',
-              style: TextStyle(color: white.withOpacity(0.4), fontSize: 14),
+              style: TextStyle(
+                color: context.onSurfaceSecondary.withOpacity(0.6),
+                fontSize: 14,
+              ),
             ),
           ],
         ),
       );
     }
 
-    return ListView.builder(
-      controller: _scrollController,
-      reverse: true, // Show newest messages at the bottom
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        // Show loading indicator at the end (top of reversed list)
-        if (_isLoadingMore && index == _messages.length) {
-          return Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF37AEE2),
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        // Dismiss keyboard when scrolling
+        if (notification is ScrollStartNotification) {
+          FocusScope.of(context).unfocus();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        controller: _scrollController,
+        reverse: true, // Show newest messages at the bottom
+        padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          // Show loading indicator at the end (top of reversed list)
+          if (_isLoadingMore && index == _messages.length) {
+            return Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF37AEE2),
+                  ),
                 ),
               ),
-            ),
+            );
+          }
+
+          final message = _messages[index];
+          final isLast =
+              index == 0 ||
+              _messages[index - 1].isOutgoing != message.isOutgoing;
+
+          // Date separator — show when the next message (older, higher index)
+          // is from a different day
+          Widget? dateSeparator;
+          if (index < _messages.length - 1) {
+            final currentDate = _getMessageDate(message);
+            final nextDate = _getMessageDate(_messages[index + 1]);
+            if (currentDate != nextDate) {
+              dateSeparator = _buildDateSeparator(currentDate);
+            }
+          } else {
+            // Very first message (oldest shown) always gets a separator
+            dateSeparator = _buildDateSeparator(_getMessageDate(message));
+          }
+
+          return Column(
+            children: [
+              if (dateSeparator != null) dateSeparator,
+              // Swipe to reply
+              Dismissible(
+                key: ValueKey('swipe_${message.id}'),
+                direction: DismissDirection.startToEnd,
+                confirmDismiss: (_) async {
+                  HapticFeedback.lightImpact();
+                  _replyTo(message);
+                  return false;
+                },
+                background: Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.only(left: 16),
+                  child: Icon(Icons.reply, color: context.accent, size: 28),
+                ),
+                child: _buildMessageBubble(message, isLast),
+              ),
+            ],
           );
-        }
+        },
+      ),
+    );
+  }
 
-        final message = _messages[index];
-        final isLast =
-            index == 0 || _messages[index - 1].isOutgoing != message.isOutgoing;
+  String _getMessageDate(TelegramMessage message) {
+    if (message.date > 0) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(message.date * 1000);
+      return _formatDate(dt);
+    }
+    return _formatDate(DateTime.now());
+  }
 
-        return _buildMessageBubble(message, isLast);
-      },
+  String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(msgDay).inDays;
+
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    if (diff < 7) {
+      const days = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return days[dt.weekday - 1];
+    }
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    if (dt.year == now.year) {
+      return '${months[dt.month - 1]} ${dt.day}';
+    }
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  Widget _buildDateSeparator(String dateText) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: context.isDark
+                ? Colors.black45
+                : Colors.black.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            dateText,
+            style: TextStyle(
+              fontSize: 13,
+              color: context.isDark ? Colors.white70 : Colors.black54,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1834,13 +2019,20 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                       ? EdgeInsets.all(4)
                       : EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isMe ? Color(0xFF2B5278) : greyColor,
+                    color: isMe ? context.bubbleMe : context.bubbleOther,
                     borderRadius: BorderRadius.only(
                       topLeft: Radius.circular(isMe ? 18 : (isLast ? 4 : 18)),
                       topRight: Radius.circular(isMe ? (isLast ? 4 : 18) : 18),
                       bottomLeft: Radius.circular(18),
                       bottomRight: Radius.circular(18),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.06),
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: isMe
@@ -1884,7 +2076,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                             _getDisplayText(message),
                             style: TextStyle(
                               fontSize: 16,
-                              color: white,
+                              color: isMe
+                                  ? context.bubbleTextMe
+                                  : context.bubbleTextOther,
                               height: 1.3,
                             ),
                           ),
@@ -1902,7 +2096,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                               message.time,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: white.withOpacity(0.6),
+                                color:
+                                    (isMe
+                                            ? context.bubbleTextMe
+                                            : context.bubbleTextOther)
+                                        .withOpacity(0.5),
                               ),
                             ),
                             if (isMe) ...[
@@ -2101,25 +2299,25 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   }
 
   Widget _buildMessageStatus(MessageStatus status) {
+    final muted = context.bubbleTextMe.withOpacity(0.5);
     switch (status) {
       case MessageStatus.sending:
         return SizedBox(
           width: 14,
           height: 14,
-          child: CircularProgressIndicator(
-            strokeWidth: 1.5,
-            color: white.withOpacity(0.6),
-          ),
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: muted),
         );
       case MessageStatus.sent:
-        return Icon(Icons.done, size: 16, color: white.withOpacity(0.6));
+        return Icon(Icons.done, size: 16, color: muted);
       case MessageStatus.delivered:
-        return Icon(Icons.done_all, size: 16, color: white.withOpacity(0.6));
+        return Icon(Icons.done_all, size: 16, color: muted);
       case MessageStatus.read:
         return Icon(
           Icons.done_all,
           size: 16,
-          color: Color(0xFF37AEE2), // Blue for read
+          color: context.isDark
+              ? Color(0xFF37AEE2)
+              : Color(0xFF4CAF50), // Blue/green for read
         );
       case MessageStatus.failed:
         return Icon(Icons.error_outline, size: 16, color: Colors.red);

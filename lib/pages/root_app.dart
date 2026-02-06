@@ -39,7 +39,7 @@ class _RootAppState extends State<RootApp> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: context.bg,
       bottomNavigationBar: getFooter(),
       body: getBody(),
     );
@@ -63,7 +63,7 @@ class _RootAppState extends State<RootApp> {
     return Container(
       height: 90,
       width: double.infinity,
-      decoration: const BoxDecoration(color: greyColor),
+      decoration: BoxDecoration(color: context.surface),
       child: Padding(
         padding: const EdgeInsets.only(top: 5),
         child: Row(
@@ -82,26 +82,31 @@ class _RootAppState extends State<RootApp> {
                     badges.Badge(
                       badgeContent: Text(
                         _totalUnread > 99 ? '99+' : _totalUnread.toString(),
-                        style: const TextStyle(color: white, fontSize: 10),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
                       ),
                       child: Icon(
                         iconItems[index],
                         size: 30,
-                        color: isSelected ? primary : white.withOpacity(0.5),
+                        color: isSelected
+                            ? primary
+                            : context.onSurfaceSecondary,
                       ),
                     )
                   else
                     Icon(
                       iconItems[index],
                       size: 30,
-                      color: isSelected ? primary : white.withOpacity(0.5),
+                      color: isSelected ? primary : context.onSurfaceSecondary,
                     ),
                   const SizedBox(height: 3),
                   Text(
                     textItems[index],
                     style: TextStyle(
                       fontSize: 11,
-                      color: isSelected ? primary : white.withOpacity(0.5),
+                      color: isSelected ? primary : context.onSurfaceSecondary,
                     ),
                   ),
                 ],

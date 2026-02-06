@@ -88,6 +88,58 @@ class TelegramService {
   Timer? _emitChatsDebounceTimer;
   static const _emitChatsDebounceMs = 100; // Debounce by 100ms
 
+  // Typing indicators - chatId -> {userId -> action description}
+  final Map<int, Map<int, String>> _typingUsers = {};
+  final _typingController =
+      StreamController<Map<int, Map<int, String>>>.broadcast();
+  Stream<Map<int, Map<int, String>>> get typingStream =>
+      _typingController.stream;
+  final Map<int, Timer> _typingTimers = {};
+
+  /// Get typing text for a chat (e.g. "John is typing...")
+  String? getTypingText(int chatId) {
+    final users = _typingUsers[chatId];
+    if (users == null || users.isEmpty) return null;
+
+    final names = <String>[];
+    for (final userId in users.keys) {
+      final user = _usersCache[userId];
+      if (user != null) {
+        names.add(user.firstName);
+      }
+    }
+    if (names.isEmpty) return null;
+    if (names.length == 1) return '${names[0]} is typing...';
+    if (names.length == 2) return '${names[0]} and ${names[1]} are typing...';
+    return '${names[0]} and ${names.length - 1} others are typing...';
+  }
+
+  /// Send typing action to indicate the current user is typing
+  Future<void> sendTypingAction(int chatId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendChatAction(
+        chatId: chatId,
+        messageThreadId: 0,
+        action: const ChatActionTyping(),
+      ),
+    );
+  }
+
+  /// Cancel typing action
+  Future<void> cancelTypingAction(int chatId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendChatAction(
+        chatId: chatId,
+        messageThreadId: 0,
+        action: const ChatActionCancel(),
+      ),
+    );
+  }
+
   // Debug mode - set to false for production
   static const bool _debugMode = false;
 
@@ -592,6 +644,38 @@ class TelegramService {
         }
       } else if (type == 'ok') {
         // Success - no need to log
+      } else if (type == 'updateChatAction') {
+        final chatId = json['chat_id'] as int?;
+        final senderJson = json['sender_id'] as Map<String, dynamic>?;
+        final actionJson = json['action'] as Map<String, dynamic>?;
+        if (chatId != null && senderJson != null && actionJson != null) {
+          int userId = 0;
+          if (senderJson['@type'] == 'messageSenderUser') {
+            userId = senderJson['user_id'] as int? ?? 0;
+          }
+          if (userId != _currentUserId && userId != 0) {
+            final actionType = actionJson['@type'] as String? ?? '';
+            if (actionType == 'chatActionCancel') {
+              _typingUsers[chatId]?.remove(userId);
+              if (_typingUsers[chatId]?.isEmpty == true) {
+                _typingUsers.remove(chatId);
+              }
+            } else {
+              _typingUsers.putIfAbsent(chatId, () => {});
+              _typingUsers[chatId]![userId] = 'typing';
+              final timerKey = chatId * 1000000 + userId;
+              _typingTimers[timerKey]?.cancel();
+              _typingTimers[timerKey] = Timer(const Duration(seconds: 6), () {
+                _typingUsers[chatId]?.remove(userId);
+                if (_typingUsers[chatId]?.isEmpty == true) {
+                  _typingUsers.remove(chatId);
+                }
+                _typingController.add(Map.from(_typingUsers));
+              });
+            }
+            _typingController.add(Map.from(_typingUsers));
+          }
+        }
       } else if (type == 'error') {
         final code = json['code'] as int?;
         final message = json['message'] as String?;
@@ -679,6 +763,46 @@ class TelegramService {
       _basicGroupsCache[update.basicGroup.id] = update.basicGroup;
     } else if (update is UpdateSupergroup) {
       _supergroupsCache[update.supergroup.id] = update.supergroup;
+    } else if (update is UpdateChatAction) {
+      // Typing indicator
+      final chatId = update.chatId;
+      final senderId = update.senderId;
+      int userId = 0;
+      if (senderId is MessageSenderUser) {
+        userId = senderId.userId;
+      }
+      if (userId == _currentUserId) return; // Ignore own typing
+      final action = update.action;
+      if (action is ChatActionCancel) {
+        _typingUsers[chatId]?.remove(userId);
+        if (_typingUsers[chatId]?.isEmpty == true) {
+          _typingUsers.remove(chatId);
+        }
+      } else {
+        String desc = 'typing';
+        if (action is ChatActionRecordingVideo) desc = 'recording video';
+        if (action is ChatActionUploadingVideo) desc = 'sending video';
+        if (action is ChatActionRecordingVoiceNote) desc = 'recording voice';
+        if (action is ChatActionUploadingVoiceNote) desc = 'sending voice';
+        if (action is ChatActionUploadingPhoto) desc = 'sending photo';
+        if (action is ChatActionUploadingDocument) desc = 'sending file';
+        if (action is ChatActionChoosingSticker) desc = 'choosing sticker';
+        if (action is ChatActionChoosingLocation) desc = 'choosing location';
+        if (action is ChatActionChoosingContact) desc = 'choosing contact';
+        _typingUsers.putIfAbsent(chatId, () => {});
+        _typingUsers[chatId]![userId] = desc;
+        // Auto-clear after 6 seconds (TDLib standard)
+        final timerKey = chatId * 1000000 + userId;
+        _typingTimers[timerKey]?.cancel();
+        _typingTimers[timerKey] = Timer(const Duration(seconds: 6), () {
+          _typingUsers[chatId]?.remove(userId);
+          if (_typingUsers[chatId]?.isEmpty == true) {
+            _typingUsers.remove(chatId);
+          }
+          _typingController.add(Map.from(_typingUsers));
+        });
+      }
+      _typingController.add(Map.from(_typingUsers));
     } else if (update is UpdateChatFolders) {
       // Chat folders updated
       _debugPrint('Chat folders updated: ${update.chatFolders.length} folders');
