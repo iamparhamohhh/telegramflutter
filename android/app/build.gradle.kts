@@ -24,10 +24,15 @@ android {
         applicationId = "com.example.telegramflutter"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = flutter.minSdkVersion  // TDLib requires minSdk 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // Enable only the architectures we need
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -37,6 +42,12 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // TDLib native libraries should be placed manually in jniLibs folder
+    // Download from: https://github.com/nicegram/nicegram-tdlib-releases/releases
+    // or build from: https://core.telegram.org/tdlib/docs/
 }
 
 flutter {

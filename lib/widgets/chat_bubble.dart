@@ -1,4 +1,3 @@
-import 'package:bubble/bubble.dart';
 import 'package:flutter/material.dart';
 import 'package:telegramflutter/theme/colors.dart';
 
@@ -15,153 +14,72 @@ class CustomBubbleChat extends StatelessWidget {
     required this.time,
     required this.isLast,
   });
+
   @override
   Widget build(BuildContext context) {
-    if (isMe) {
-      if (!isLast) {
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 20, right: 20, bottom: 2),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: primary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          message,
-                          style: const TextStyle(fontSize: 16, color: white),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          time,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: white.withOpacity(0.4),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Row(
+        mainAxisAlignment: isMe
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMe && isLast) ...[SizedBox(width: 4)],
+          if (!isMe && !isLast) ...[SizedBox(width: 38)],
+          Flexible(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isMe ? Color(0xFF2B5278) : greyColor,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(isMe ? 18 : (isLast ? 4 : 18)),
+                  topRight: Radius.circular(isMe ? (isLast ? 4 : 18) : 18),
+                  bottomLeft: Radius.circular(18),
+                  bottomRight: Radius.circular(18),
                 ),
               ),
-            ),
-          ],
-        );
-      } else {
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 20, right: 14, bottom: 10),
-                child: Bubble(
-                  nip: BubbleNip.rightBottom,
-                  color: primary,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+              child: Column(
+                crossAxisAlignment: isMe
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message,
+                    style: TextStyle(fontSize: 16, color: white, height: 1.3),
+                  ),
+                  SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        message,
-                        style: TextStyle(fontSize: 16, color: white),
-                      ),
-                      SizedBox(height: 3),
                       Text(
                         time,
                         style: TextStyle(
                           fontSize: 12,
-                          color: white.withOpacity(0.4),
+                          color: white.withOpacity(0.6),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      }
-    } else {
-      if (!isLast) {
-        return Row(
-          children: [
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 20, right: 20, bottom: 2),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: greyColor,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.only(
-                      left: 8,
-                      right: 8,
-                      top: 5,
-                      bottom: 5,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          message,
-                          style: TextStyle(fontSize: 16, color: white),
-                        ),
-                        SizedBox(height: 3),
-                        Text(
-                          time,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: white.withOpacity(0.4),
-                          ),
+                      if (isMe) ...[
+                        SizedBox(width: 4),
+                        Icon(
+                          Icons.done_all,
+                          size: 16,
+                          color: Color(0xFF37AEE2),
                         ),
                       ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      } else {
-        return Row(
-          children: [
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 20, left: 14, bottom: 10),
-                child: Bubble(
-                  nip: BubbleNip.rightBottom,
-                  color: greyColor,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        message,
-                        style: TextStyle(fontSize: 16, color: white),
-                      ),
-                      SizedBox(height: 3),
-                      Text(
-                        time,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: white.withOpacity(0.4),
-                        ),
-                      ),
                     ],
                   ),
-                ),
+                ],
               ),
             ),
-          ],
-        );
-      }
-    }
+          ),
+          if (isMe && isLast) ...[SizedBox(width: 4)],
+          if (isMe && !isLast) ...[SizedBox(width: 38)],
+        ],
+      ),
+    );
   }
 }

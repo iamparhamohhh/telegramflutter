@@ -1,14 +1,15 @@
 allprojects {
     repositories {
-        // China mirrors (faster in China)
+        // Aliyun mirrors first for better connectivity
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/central") }
-        // Flutter artifacts mirror for China
-        maven { url = uri("https://storage.flutter-io.cn/download.flutter.io") }
-        // Original repositories as fallback
+        // Original repositories 
         google()
         mavenCentral()
+        // JitPack for TDLib
+        maven { url = uri("https://jitpack.io") }
+        // Flutter artifacts mirror
+        maven { url = uri("https://storage.flutter-io.cn/download.flutter.io") }
     }
 }
 

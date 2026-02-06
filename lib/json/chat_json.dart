@@ -1,10 +1,9 @@
-
 const List profile = [
   {
     "name": "VAN Sopheamen",
     "img":
-        "https://yt3.ggpht.com/ytc/AKedOLTHDJOiJgIkQBX7zkuGEXTY0SgIdiikKIAhXmsttw=s600-c-k-c0x00ffffff-no-rj-rp-mo"
-  }
+        "https://yt3.ggpht.com/ytc/AKedOLTHDJOiJgIkQBX7zkuGEXTY0SgIdiikKIAhXmsttw=s600-c-k-c0x00ffffff-no-rj-rp-mo",
+  },
 ];
 
 const List chat_data = [
@@ -14,7 +13,9 @@ const List chat_data = [
     "name": "Ben Parker",
     "text": "Yes, got it. Thanks for your contacting.",
     "date": "3:23 PM",
-    "badge" : 0
+    "badge": 0,
+    "sent": true,
+    "read": true,
   },
   {
     "img":
@@ -22,7 +23,9 @@ const List chat_data = [
     "name": "Ben den Engelsen",
     "text": "Hey man, let's catup soon.",
     "date": "3:23 PM",
-    "badge" : 3
+    "badge": 3,
+    "sent": false,
+    "read": false,
   },
   {
     "img":
@@ -30,7 +33,9 @@ const List chat_data = [
     "name": "Foto Sushi",
     "text": "going to sleep now",
     "date": "2:28 PM",
-    "badge" : 1
+    "badge": 1,
+    "sent": false,
+    "read": false,
   },
   {
     "img":
@@ -38,7 +43,9 @@ const List chat_data = [
     "name": "Ayo Ogunseinde",
     "text": "Have a nice day, Sopheamen 😁",
     "date": "9:36 PM",
-    "badge" : 1
+    "badge": 1,
+    "sent": false,
+    "read": false,
   },
   {
     "img":
@@ -46,7 +53,9 @@ const List chat_data = [
     "name": "Steve Halama",
     "text": "How is everthing?",
     "date": "Sat",
-    "badge" : 0
+    "badge": 0,
+    "sent": false,
+    "read": false,
   },
   {
     "img":
@@ -54,7 +63,9 @@ const List chat_data = [
     "name": "Zohre Nemati",
     "text": "ok",
     "date": "Fri",
-    "badge" : 2
+    "badge": 2,
+    "sent": false,
+    "read": false,
   },
   {
     "img":
@@ -62,11 +73,11 @@ const List chat_data = [
     "name": "Patrick Hendry",
     "text": "take care! speak soon :)",
     "date": "Thu",
-    "badge" : 0
-  }
+    "badge": 0,
+    "sent": true,
+    "read": false,
+  },
 ];
-
-
 
 const List messages = [
   {
@@ -87,12 +98,7 @@ const List messages = [
     "time": "1:41 PM",
     "isLast": false,
   },
-  {
-    "isMe": true,
-    "message": "okay friend,",
-    "time": "1:41 PM",
-    "isLast": true,
-  },
+  {"isMe": true, "message": "okay friend,", "time": "1:41 PM", "isLast": true},
   {
     "isMe": false,
     "message": "Good ey friend",
@@ -105,18 +111,8 @@ const List messages = [
     "time": "2:44 PM",
     "isLast": false,
   },
-  {
-    "isMe": false,
-    "message": "good nas",
-    "time": "2:45 PM",
-    "isLast": false,
-  },
-  {
-    "isMe": false,
-    "message": "Hi frienddd.",
-    "time": "2:46 PM",
-    "isLast": true,
-  },
+  {"isMe": false, "message": "good nas", "time": "2:45 PM", "isLast": false},
+  {"isMe": false, "message": "Hi frienddd.", "time": "2:46 PM", "isLast": true},
   {
     "isMe": true,
     "message": "yes, hey again Sophal",
@@ -165,12 +161,7 @@ const List messages = [
     "time": "2:46 PM",
     "isLast": true,
   },
-  {
-    "isMe": true,
-    "message": "Wow, niceee",
-    "time": "1:40 PM",
-    "isLast": false,
-  },
+  {"isMe": true, "message": "Wow, niceee", "time": "1:40 PM", "isLast": false},
   {
     "isMe": true,
     "message": "Yes very good",
