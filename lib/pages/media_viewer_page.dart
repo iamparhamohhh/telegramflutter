@@ -417,6 +417,7 @@ class LocationMessageWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Static map image URL (using OpenStreetMap tiles through a simple service)
+    // ignore: unused_local_variable
     final mapUrl =
         'https://static-maps.yandex.ru/1.x/?lang=en-US&ll=$longitude,$latitude&z=15&l=map&size=300,200&pt=$longitude,$latitude,pm2rdm';
 

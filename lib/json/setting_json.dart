@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:line_icons/line_icons.dart';
 
-List setting_section_one = [
+List settingSectionOne = [
   {"icon": Icons.bookmark, "text": "Saved Messages", "color": Colors.blue[700]},
   {
     "icon": FontAwesomeIcons.phone,
@@ -13,7 +13,7 @@ List setting_section_one = [
   {"icon": Icons.folder, "text": "Chat Folders", "color": Colors.cyan},
 ];
 
-List setting_section_two = [
+List settingSectionTwo = [
   {
     "icon": Icons.notifications,
     "text": "Notifications and Sounds",
@@ -34,7 +34,7 @@ List setting_section_two = [
   },
 ];
 
-List setting_section_three = [
+List settingSectionThree = [
   {"icon": Icons.chat, "text": "Ask a Question", "color": Colors.yellow[800]},
   {"icon": Icons.info, "text": "Telegram FAQ", "color": Colors.cyan},
   {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/telegram_service.dart';
 import '../theme/colors.dart';
 import 'chat_detail_page.dart';
+import 'secret_chat_page.dart';
 
 class NewChatPage extends StatefulWidget {
   const NewChatPage({super.key});
@@ -13,7 +14,7 @@ class NewChatPage extends StatefulWidget {
 class _NewChatPageState extends State<NewChatPage> {
   final TelegramService _telegramService = TelegramService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<TelegramContact> _contacts = [];
   List<TelegramContact> _filteredContacts = [];
   List<Map<String, dynamic>> _searchResults = [];
@@ -60,15 +61,15 @@ class _NewChatPageState extends State<NewChatPage> {
 
   Future<void> _searchGlobally(String query) async {
     if (query.isEmpty || query.length < 3) return;
-    
+
     setState(() => _isSearching = true);
-    
+
     // Just trigger the search - results will come via updates
     _telegramService.requestSearchPublicChats(query);
-    
+
     // Wait a bit for results to come back
     await Future.delayed(const Duration(milliseconds: 500));
-    
+
     if (mounted) {
       setState(() {
         _isSearching = false;
@@ -80,17 +81,17 @@ class _NewChatPageState extends State<NewChatPage> {
   Future<void> _openChat(int userId) async {
     // Request private chat creation
     _telegramService.createPrivateChat(userId);
-    
+
     // Wait for chat to be created and show up in chats
     await Future.delayed(const Duration(milliseconds: 500));
-    
+
     // Find the user to get their name for temp chat
     final user = _telegramService.getUser(userId);
-    
+
     // Try to find the chat in chats list
     final chats = _telegramService.chats;
     final existingChat = chats.where((c) => c.id == userId).firstOrNull;
-    
+
     if (existingChat != null && mounted) {
       Navigator.pushReplacement(
         context,
@@ -109,12 +110,10 @@ class _NewChatPageState extends State<NewChatPage> {
         isRead: true,
         isSentByMe: false,
       );
-      
+
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (context) => ChatDetailPage(chat: chat),
-        ),
+        MaterialPageRoute(builder: (context) => ChatDetailPage(chat: chat)),
       );
     }
   }
@@ -182,7 +181,7 @@ class _NewChatPageState extends State<NewChatPage> {
               ),
             ),
           ),
-          
+
           // Action buttons
           Container(
             color: greyColor,
@@ -206,25 +205,38 @@ class _NewChatPageState extends State<NewChatPage> {
                   icon: Icons.person_add,
                   title: 'Invite Friends',
                   onTap: () {
-                    // Share app invite
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Share feature coming soon')),
+                      const SnackBar(
+                        content: Text('Share feature coming soon'),
+                      ),
+                    );
+                  },
+                ),
+                _buildActionTile(
+                  icon: Icons.lock_outline,
+                  title: 'New Secret Chat',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SecretChatPage()),
                     );
                   },
                 ),
               ],
             ),
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           // Contacts label
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: greyColor,
             child: Text(
-              _searchQuery.isEmpty ? 'Contacts' : 'Contacts (${_filteredContacts.length})',
+              _searchQuery.isEmpty
+                  ? 'Contacts'
+                  : 'Contacts (${_filteredContacts.length})',
               style: TextStyle(
                 color: Colors.blue[300],
                 fontWeight: FontWeight.w500,
@@ -232,47 +244,45 @@ class _NewChatPageState extends State<NewChatPage> {
               ),
             ),
           ),
-          
+
           // Contacts list
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _filteredContacts.isEmpty && _searchResults.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.contacts,
-                              size: 64,
-                              color: Colors.grey[600],
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _searchQuery.isEmpty
-                                  ? 'No contacts yet'
-                                  : 'No contacts found',
-                              style: TextStyle(
-                                color: Colors.grey[500],
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.contacts, size: 64, color: Colors.grey[600]),
+                        const SizedBox(height: 16),
+                        Text(
+                          _searchQuery.isEmpty
+                              ? 'No contacts yet'
+                              : 'No contacts found',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 16,
+                          ),
                         ),
-                      )
-                    : ListView.builder(
-                        itemCount: _filteredContacts.length + _searchResults.length,
-                        itemBuilder: (context, index) {
-                          if (index < _filteredContacts.length) {
-                            return _buildContactTile(_filteredContacts[index]);
-                          } else {
-                            final resultIndex = index - _filteredContacts.length;
-                            return _buildSearchResultTile(_searchResults[resultIndex]);
-                          }
-                        },
-                      ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _filteredContacts.length + _searchResults.length,
+                    itemBuilder: (context, index) {
+                      if (index < _filteredContacts.length) {
+                        return _buildContactTile(_filteredContacts[index]);
+                      } else {
+                        final resultIndex = index - _filteredContacts.length;
+                        return _buildSearchResultTile(
+                          _searchResults[resultIndex],
+                        );
+                      }
+                    },
+                  ),
           ),
-          
+
           if (_isSearching)
             Container(
               padding: const EdgeInsets.all(16),
@@ -326,11 +336,10 @@ class _NewChatPageState extends State<NewChatPage> {
   Widget _buildContactTile(TelegramContact contact) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: Colors.primaries[contact.id.abs() % Colors.primaries.length],
+        backgroundColor:
+            Colors.primaries[contact.id.abs() % Colors.primaries.length],
         child: Text(
-          contact.fullName.isNotEmpty
-              ? contact.fullName[0].toUpperCase()
-              : '?',
+          contact.fullName.isNotEmpty ? contact.fullName[0].toUpperCase() : '?',
           style: const TextStyle(color: Colors.white),
         ),
       ),
@@ -362,10 +371,7 @@ class _NewChatPageState extends State<NewChatPage> {
           color: Colors.white,
         ),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(color: Colors.white),
-      ),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
       subtitle: Text(
         isPrivate ? 'User' : 'Group/Channel',
         style: TextStyle(color: Colors.grey[500]),

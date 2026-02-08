@@ -218,8 +218,9 @@ class MediaInfo {
   String get fileSizeText {
     if (fileSize == null) return '';
     if (fileSize! < 1024) return '$fileSize B';
-    if (fileSize! < 1024 * 1024)
+    if (fileSize! < 1024 * 1024) {
       return '${(fileSize! / 1024).toStringAsFixed(1)} KB';
+    }
     if (fileSize! < 1024 * 1024 * 1024) {
       return '${(fileSize! / (1024 * 1024)).toStringAsFixed(1)} MB';
     }

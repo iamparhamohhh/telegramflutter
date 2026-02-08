@@ -6,7 +6,7 @@ const List profile = [
   },
 ];
 
-const List chat_data = [
+const List chatData = [
   {
     "img":
         "https://images.unsplash.com/photo-1531427186611-ecfd6d936c79?ixid=MXwxMjA3fDB8MHxzZWFyY2h8MTB8fHByb2ZpbGV8ZW58MHx8MHw%3D&ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=60",

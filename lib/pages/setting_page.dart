@@ -8,10 +8,7 @@ import 'package:telegramflutter/pages/my_profile_page.dart';
 import 'package:telegramflutter/pages/edit_profile_page.dart';
 import 'package:telegramflutter/pages/privacy_security_page.dart';
 import 'package:telegramflutter/pages/notification_settings_page.dart';
-import 'package:telegramflutter/pages/active_sessions_page.dart';
-import 'package:telegramflutter/pages/data_storage_page.dart';
-import 'package:telegramflutter/pages/app_lock_page.dart';
-import 'package:line_icons/line_icons.dart';
+import 'package:telegramflutter/pages/saved_messages_page.dart';
 
 class SettingPage extends StatefulWidget {
   const SettingPage({super.key});
@@ -112,104 +109,7 @@ class _SettingPageState extends State<SettingPage> {
     });
   }
 
-  Widget _buildEditProfileSheet() {
-    final firstNameController = TextEditingController(
-      text: _currentUser?['first_name'] ?? '',
-    );
-    final lastNameController = TextEditingController(
-      text: _currentUser?['last_name'] ?? '',
-    );
-    final bioController = TextEditingController(
-      text: _currentUser?['bio'] ?? '',
-    );
-
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: EdgeInsets.only(top: 8),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: white.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(
-                      'Cancel',
-                      style: TextStyle(color: white.withOpacity(0.7)),
-                    ),
-                  ),
-                  Text(
-                    'Edit Profile',
-                    style: TextStyle(
-                      color: white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      try {
-                        await _telegramService.updateProfile(
-                          firstName: firstNameController.text,
-                          lastName: lastNameController.text,
-                          bio: bioController.text,
-                        );
-                        _loadUserData();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Profile updated')),
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to update profile')),
-                          );
-                        }
-                      }
-                    },
-                    child: Text(
-                      'Save',
-                      style: TextStyle(color: Color(0xFF37AEE2)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  _buildTextField('First Name', firstNameController),
-                  SizedBox(height: 16),
-                  _buildTextField('Last Name', lastNameController),
-                  SizedBox(height: 16),
-                  _buildTextField('Bio', bioController, maxLines: 3),
-                  SizedBox(height: 24),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ignore: unused_element
   Widget _buildTextField(
     String label,
     TextEditingController controller, {
@@ -344,6 +244,15 @@ class _SettingPageState extends State<SettingPage> {
           // Account section
           _buildSectionHeader('Account'),
           _buildSettingItem(
+            icon: Icons.bookmark,
+            color: Colors.blue,
+            title: 'Saved Messages',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SavedMessagesPage()),
+            ),
+          ),
+          _buildSettingItem(
             icon: Icons.notifications_outlined,
             color: Colors.orange,
             title: 'Notifications and Sounds',
@@ -365,10 +274,7 @@ class _SettingPageState extends State<SettingPage> {
             subtitle: _storageStats != null
                 ? 'Using ${_formatFileSize(_storageStats!['size'] as int?)}'
                 : null,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const DataStoragePage()),
-            ),
+            onTap: () => _showStorageSettings(),
           ),
           _buildSettingItem(
             icon: Icons.chat_bubble_outline,
@@ -397,22 +303,8 @@ class _SettingPageState extends State<SettingPage> {
           _buildSettingItem(
             icon: Icons.devices_outlined,
             color: Colors.orange,
-            title: 'Active Sessions',
-            subtitle: 'Manage your devices',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ActiveSessionsPage()),
-            ),
-          ),
-          _buildSettingItem(
-            icon: LineIcons.lock,
-            color: Colors.indigo,
-            title: 'App Lock',
-            subtitle: 'Passcode & biometrics',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AppLockPage()),
-            ),
+            title: 'Devices',
+            onTap: () {},
           ),
 
           SizedBox(height: 24),
@@ -519,22 +411,109 @@ class _SettingPageState extends State<SettingPage> {
     );
   }
 
+  void _showStorageSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: greyColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: EdgeInsets.only(top: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: white.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Data and Storage',
+                style: TextStyle(
+                  color: white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (_storageStats != null) ...[
+              ListTile(
+                leading: Icon(Icons.storage, color: Color(0xFF37AEE2)),
+                title: Text('Total Size', style: TextStyle(color: white)),
+                trailing: Text(
+                  _formatFileSize(_storageStats!['size'] as int?),
+                  style: TextStyle(color: white.withOpacity(0.7)),
+                ),
+              ),
+              ListTile(
+                leading: Icon(Icons.folder, color: Colors.orange),
+                title: Text('Files', style: TextStyle(color: white)),
+                trailing: Text(
+                  '${_storageStats!['count'] ?? 0} files',
+                  style: TextStyle(color: white.withOpacity(0.7)),
+                ),
+              ),
+            ],
+            Padding(
+              padding: EdgeInsets.all(16),
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    await _telegramService.optimizeStorage();
+                    _loadUserData();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Storage optimized')),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to optimize storage')),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(0xFF37AEE2),
+                  minimumSize: Size(double.infinity, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text('Clear Cache', style: TextStyle(color: white)),
+              ),
+            ),
+            SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showLogoutConfirmation() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: context.surface,
-        title: Text('Log Out', style: TextStyle(color: context.onSurface)),
+        backgroundColor: greyColor,
+        title: Text('Log Out', style: TextStyle(color: white)),
         content: Text(
           'Are you sure you want to log out?',
-          style: TextStyle(color: context.onSurface.withOpacity(0.8)),
+          style: TextStyle(color: white.withOpacity(0.8)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Cancel',
-              style: TextStyle(color: context.onSurface.withOpacity(0.7)),
+              style: TextStyle(color: white.withOpacity(0.7)),
             ),
           ),
           TextButton(

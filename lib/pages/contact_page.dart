@@ -139,20 +139,20 @@ class _ContactPageState extends State<ContactPage> {
     return Padding(
       padding: const EdgeInsets.only(left: 10),
       child: Column(
-        children: List.generate(contact_data.length, (index) {
+        children: List.generate(contactData.length, (index) {
           return Column(
             children: [
               Row(
                 children: [
                   CircleAvatar(
-                    backgroundImage: NetworkImage(contact_data[index]['img']),
+                    backgroundImage: NetworkImage(contactData[index]['img']),
                   ),
                   SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        contact_data[index]['name'],
+                        contactData[index]['name'],
                         style: TextStyle(
                           fontSize: 17,
                           color: white,
@@ -161,12 +161,12 @@ class _ContactPageState extends State<ContactPage> {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        contact_data[index]['is_online']
+                        contactData[index]['is_online']
                             ? "online"
-                            : contact_data[index]['seen'],
+                            : contactData[index]['seen'],
                         style: TextStyle(
                           fontSize: 13,
-                          color: contact_data[index]['is_online']
+                          color: contactData[index]['is_online']
                               ? primary
                               : white.withOpacity(0.5),
                           fontWeight: FontWeight.w500,

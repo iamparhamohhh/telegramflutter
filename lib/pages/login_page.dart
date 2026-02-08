@@ -552,8 +552,9 @@ class _LoginPageState extends State<LoginPage> {
                                         )
                                         .toList(),
                                 onChanged: (v) {
-                                  if (v != null)
+                                  if (v != null) {
                                     setState(() => countryCode = v);
+                                  }
                                 },
                               ),
                             ),

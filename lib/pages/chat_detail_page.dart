@@ -7,12 +7,15 @@ import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/pages/profile_page.dart';
 import 'package:telegramflutter/pages/media_viewer_page.dart';
 import 'package:telegramflutter/pages/search_page.dart';
+import 'package:telegramflutter/pages/poll_creation_page.dart';
+import 'package:telegramflutter/pages/scheduled_messages_page.dart';
+import 'package:telegramflutter/pages/call_page.dart';
+import 'package:telegramflutter/pages/group_call_page.dart';
 import 'package:telegramflutter/widgets/media_widgets.dart';
 import 'package:telegramflutter/models/user_profile.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
-//import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -73,14 +76,14 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   TelegramMessage? _editingMessage;
 
   // Voice recording state
-  bool _isRecording = false;
-  String? _recordingPath;
+  bool _isRecording = false; // ignore: unused_field
+  String? _recordingPath; // ignore: unused_field
   int _recordingDuration = 0;
   Timer? _recordingTimer;
 
   // Audio playback state
   int? _playingMessageId;
-  double _playbackProgress = 0.0;
+  final double _playbackProgress = 0.0;
 
   // Highlight message state
   int? _highlightedMessageId;
@@ -774,7 +777,29 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           tooltip: 'Search in chat',
         ),
         IconButton(
-          onPressed: () {},
+          onPressed: () {
+            final userId = _telegramService.getChatUserId(widget.realChatId);
+            if (userId != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CallPage(
+                    userId: userId,
+                    userName: widget.chatName,
+                    userPhoto: widget.chatImg.isNotEmpty
+                        ? widget.chatImg
+                        : null,
+                  ),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Calls available for private chats only'),
+                ),
+              );
+            }
+          },
           icon: Icon(
             Icons.call,
             color: context.appBarText.withOpacity(0.8),
@@ -783,7 +808,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           tooltip: 'Call',
         ),
         IconButton(
-          onPressed: () {},
+          onPressed: () => _showChatMoreOptions(),
           icon: Icon(
             Icons.more_vert,
             color: context.appBarText.withOpacity(0.8),
@@ -1117,6 +1142,38 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                       ),
                     ],
                   ),
+                  SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildAttachmentOption(
+                        Icons.poll,
+                        'Poll',
+                        Colors.teal,
+                        () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  PollCreationPage(chatId: widget.realChatId),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildAttachmentOption(
+                        Icons.schedule_send,
+                        'Schedule',
+                        Colors.indigo,
+                        () {
+                          Navigator.pop(context);
+                          _showScheduleMessageDialog();
+                        },
+                      ),
+                      SizedBox(width: 60),
+                      SizedBox(width: 60),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1292,7 +1349,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       _showLocationConfirmDialog(position.latitude, position.longitude);
     } catch (e) {
       Navigator.pop(context); // Dismiss loading if error
-    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1582,6 +1638,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   // VOICE RECORDING METHODS
   // ════════════════════════════════════════════════════════════════════════
 
+  // ignore: unused_element
   Future<void> _startRecording() async {
     try {
       if (await _audioRecorder.hasPermission()) {
@@ -1642,10 +1699,12 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     }
   }
 
+  // ignore: unused_element
   void _cancelRecording() {
     _stopRecording(send: false);
   }
 
+  // ignore: unused_element
   String _formatRecordingDuration() {
     final minutes = _recordingDuration ~/ 60;
     final seconds = _recordingDuration % 60;
@@ -1757,6 +1816,195 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     setState(() {
       _replyToMessage = null;
     });
+  }
+
+  void _showChatMoreOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: greyColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.schedule, color: Colors.blue),
+              title: const Text(
+                'Scheduled Messages',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ScheduledMessagesPage(
+                      chatId: widget.realChatId,
+                      chatTitle: widget.chatName,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam, color: Colors.purple),
+              title: const Text(
+                'Start Voice Chat',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => GroupCallPage(
+                      chatId: widget.realChatId,
+                      chatTitle: widget.chatName,
+                      isCreating: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.search, color: Colors.white),
+              title: const Text(
+                'Search',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SearchPage(
+                      initialChatId: widget.realChatId,
+                      initialChatTitle: widget.chatName,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person, color: Colors.white),
+              title: const Text(
+                'View Profile',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ProfilePage(
+                      chatId: widget.realChatId,
+                      chatTitle: widget.chatName,
+                      chatPhotoPath: widget.chatImg.isNotEmpty
+                          ? widget.chatImg
+                          : null,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.notifications_off_outlined,
+                color: Colors.orange,
+              ),
+              title: const Text('Mute', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Mute settings coming soon')),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showScheduleMessageDialog() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      builder: (context, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(primary: Colors.blue),
+        ),
+        child: child!,
+      ),
+    );
+    if (date == null || !mounted) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+      builder: (context, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(primary: Colors.blue),
+        ),
+        child: child!,
+      ),
+    );
+    if (time == null || !mounted) return;
+
+    final scheduledDate = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    final text = _messageController.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Type a message first to schedule')),
+      );
+      return;
+    }
+
+    final timestamp = scheduledDate.millisecondsSinceEpoch ~/ 1000;
+    await _telegramService.sendScheduledMessage(
+      widget.realChatId,
+      text,
+      scheduledDate: timestamp,
+      replyToMessageId: _replyToMessage?.id,
+    );
+    _messageController.clear();
+    _cancelReply();
+    if (mounted) {
+      final months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      final h = scheduledDate.hour.toString().padLeft(2, '0');
+      final m = scheduledDate.minute.toString().padLeft(2, '0');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Message scheduled for ${months[scheduledDate.month - 1]} ${scheduledDate.day} at $h:$m',
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildAttachmentOption(
@@ -1986,6 +2234,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   Widget _buildMessageBubble(TelegramMessage message, bool isLast) {
     final isMe = message.isOutgoing;
     final hasMedia = message.mediaInfo != null;
+    // ignore: unused_local_variable
     final mediaType = message.contentType;
     final isHighlighted =
         _highlightedMessageId == message.id && _highlightAnimating;
@@ -2284,10 +2533,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       default:
         return MediaType.unknown;
     }
-  }
-
-  void _downloadMediaByFileId(int fileId) {
-    _telegramService.downloadFileWithProgress(fileId);
   }
 
   void _openMedia(String? path) {

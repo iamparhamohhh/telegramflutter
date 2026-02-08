@@ -14,7 +14,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
   final TelegramService _telegramService = TelegramService();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _groupNameController = TextEditingController();
-  
+
   List<TelegramContact> _contacts = [];
   List<TelegramContact> _filteredContacts = [];
   final Set<int> _selectedUserIds = {};
@@ -94,32 +94,22 @@ class _NewGroupPageState extends State<NewGroupPage> {
         title: name,
         userIds: _selectedUserIds.toList(),
       );
-      
+
       // Wait for group to be created
       await Future.delayed(const Duration(milliseconds: 800));
 
       if (mounted) {
-        final chat = TelegramChat(
-          id: 0, // Will be updated when group loads
-          title: name,
-          lastMessage: '',
-          lastMessageTime: '',
-          unreadCount: 0,
-          isRead: true,
-          isSentByMe: false,
-        );
-        
         // Go back to chats - user will see new group there
         Navigator.of(context).popUntil((route) => route.isFirst);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Group "$name" created')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Group "$name" created')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -164,10 +154,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
           if (_step == 0 && _selectedUserIds.isNotEmpty)
             TextButton(
               onPressed: _proceedToNameStep,
-              child: const Text(
-                'Next',
-                style: TextStyle(color: Colors.blue),
-              ),
+              child: const Text('Next', style: TextStyle(color: Colors.blue)),
             ),
         ],
       ),
@@ -247,10 +234,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
             _selectedUserIds.isEmpty
                 ? 'Add members to the group'
                 : '${_selectedUserIds.length} member${_selectedUserIds.length > 1 ? 's' : ''} selected',
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
         ),
 
@@ -259,20 +243,20 @@ class _NewGroupPageState extends State<NewGroupPage> {
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _filteredContacts.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No contacts found',
-                        style: TextStyle(color: Colors.grey[500]),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _filteredContacts.length,
-                      itemBuilder: (context, index) {
-                        final contact = _filteredContacts[index];
-                        final isSelected = _selectedUserIds.contains(contact.id);
-                        return _buildContactTile(contact, isSelected);
-                      },
-                    ),
+              ? Center(
+                  child: Text(
+                    'No contacts found',
+                    style: TextStyle(color: Colors.grey[500]),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: _filteredContacts.length,
+                  itemBuilder: (context, index) {
+                    final contact = _filteredContacts[index];
+                    final isSelected = _selectedUserIds.contains(contact.id);
+                    return _buildContactTile(contact, isSelected);
+                  },
+                ),
         ),
       ],
     );
@@ -305,7 +289,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 24),
 
           // Group name field
@@ -330,12 +314,9 @@ class _NewGroupPageState extends State<NewGroupPage> {
           // Members preview
           Text(
             '${_selectedUserIds.length} member${_selectedUserIds.length > 1 ? 's' : ''}',
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
-          
+
           const SizedBox(height: 16),
 
           Wrap(
@@ -353,7 +334,8 @@ class _NewGroupPageState extends State<NewGroupPage> {
               return Column(
                 children: [
                   CircleAvatar(
-                    backgroundColor: Colors.primaries[userId.abs() % Colors.primaries.length],
+                    backgroundColor: Colors
+                        .primaries[userId.abs() % Colors.primaries.length],
                     radius: 24,
                     child: Text(
                       contact.fullName.isNotEmpty
@@ -369,10 +351,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
                       contact.firstName,
                       textAlign: TextAlign.center,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.grey[400],
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: Colors.grey[400], fontSize: 12),
                     ),
                   ),
                 ],
@@ -422,7 +401,8 @@ class _NewGroupPageState extends State<NewGroupPage> {
       leading: Stack(
         children: [
           CircleAvatar(
-            backgroundColor: Colors.primaries[contact.id.abs() % Colors.primaries.length],
+            backgroundColor:
+                Colors.primaries[contact.id.abs() % Colors.primaries.length],
             child: Text(
               contact.fullName.isNotEmpty
                   ? contact.fullName[0].toUpperCase()
@@ -442,11 +422,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
                   borderRadius: BorderRadius.circular(9),
                   border: Border.all(color: bgColor, width: 2),
                 ),
-                child: const Icon(
-                  Icons.check,
-                  size: 12,
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.check, size: 12, color: Colors.white),
               ),
             ),
         ],

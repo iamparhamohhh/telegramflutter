@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
 import 'package:telegramflutter/widgets/media_widgets.dart';
+import 'package:telegramflutter/pages/call_page.dart';
 
 /// Profile page for viewing user/chat details
 class ProfilePage extends StatefulWidget {
@@ -302,8 +303,15 @@ class _ProfilePageState extends State<ProfilePage>
               icon: Icons.call,
               label: 'Call',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Voice calls coming soon')),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CallPage(
+                      userId: _userId!,
+                      userName: widget.chatTitle,
+                      userPhoto: widget.chatPhotoPath,
+                    ),
+                  ),
                 );
               },
             ),
@@ -312,8 +320,16 @@ class _ProfilePageState extends State<ProfilePage>
               icon: Icons.videocam,
               label: 'Video',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Video calls coming soon')),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CallPage(
+                      userId: _userId!,
+                      userName: widget.chatTitle,
+                      userPhoto: widget.chatPhotoPath,
+                      isVideo: true,
+                    ),
+                  ),
                 );
               },
             ),

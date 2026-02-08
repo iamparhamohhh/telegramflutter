@@ -8,9 +8,11 @@ import 'package:telegramflutter/pages/new_chat_page.dart';
 import 'package:telegramflutter/pages/new_group_page.dart';
 import 'package:telegramflutter/pages/new_channel_page.dart';
 import 'package:telegramflutter/pages/chat_folders_page.dart';
+import 'package:telegramflutter/pages/saved_messages_page.dart';
+import 'package:telegramflutter/pages/secret_chat_page.dart';
+import 'package:telegramflutter/pages/stories_page.dart';
 import 'package:telegramflutter/services/telegram_service.dart';
 import 'package:telegramflutter/theme/colors.dart';
-//import 'package:telegramflutter/widgets/media_widgets.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -364,8 +366,41 @@ class _ChatPageState extends State<ChatPage>
                 ),
                 onTap: () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Saved messages coming soon')),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SavedMessagesPage(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.lock_outline, color: Colors.green),
+                title: const Text(
+                  'New Secret Chat',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SecretChatPage()),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_stories, color: Colors.purple),
+                title: const Text(
+                  'My Stories',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const StoryCreationPage(),
+                    ),
                   );
                 },
               ),

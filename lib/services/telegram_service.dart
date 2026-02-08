@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:tdlib/td_api.dart';
 import 'package:tdlib/tdlib.dart';
-import 'package:tdlib/src/tdclient/platform_interfaces/td_plugin.dart';
 
 /// Represents a chat item from Telegram
 class TelegramChat {
@@ -182,6 +181,7 @@ class TelegramService {
   bool _parametersSet = false;
 
   // Debug counters
+  // ignore: unused_field
   int _updateCount = 0;
   int _nullCount = 0;
 
@@ -284,7 +284,7 @@ class TelegramService {
       // Send GetAuthorizationState to "wake up" the TDLib client
       // This triggers TDLib to initialize and start sending updates
       tdSend(_clientId, const GetAuthorizationState());
-    } catch (e, stack) {
+    } catch (e) {
       _debugPrint('TDLib initialization error: $e');
       _authStateController.addError(e);
       rethrow;
@@ -337,7 +337,7 @@ class TelegramService {
       TdObject? update;
       try {
         update = convertToObject(jsonString);
-      } catch (parseError, parseStack) {
+      } catch (parseError) {
         // Try to extract useful info from raw JSON even if full parsing fails
         _handleRawJson(jsonString);
 
@@ -357,7 +357,7 @@ class TelegramService {
       Future.microtask(() {
         if (_isRunning) _pollUpdates();
       });
-    } catch (e, stack) {
+    } catch (e) {
       // TDLib JSON parsing errors can happen due to API version mismatches
       // Log the error but continue receiving updates
       _debugPrint('TDLib receive error: $e');
@@ -546,18 +546,15 @@ class TelegramService {
         // Storage statistics response
         _storageStatistics = json;
       } else if (type == 'sessions') {
-        // Active sessions response
         final sessionsList = json['sessions'] as List<dynamic>? ?? [];
         _activeSessions = sessionsList
             .map((s) => Map<String, dynamic>.from(s as Map))
             .toList();
         _sessionsController.add(_activeSessions);
       } else if (type == 'accountTtl') {
-        // Account TTL response
         _accountTtlDays = json['days'] as int? ?? 365;
         _accountTtlController.add(_accountTtlDays);
       } else if (type == 'userPrivacySettingRules') {
-        // Privacy setting rules response
         final rules = json['rules'] as List<dynamic>? ?? [];
         if (_pendingPrivacySetting != null && rules.isNotEmpty) {
           final firstRule = rules.first as Map<String, dynamic>;
@@ -675,6 +672,34 @@ class TelegramService {
         }
       } else if (type == 'ok') {
         // Success - no need to log
+      } else if (type == 'updateCall') {
+        final call = json['call'] as Map<String, dynamic>?;
+        if (call != null) {
+          _callStateController.add(call);
+        }
+      } else if (type == 'updateGroupCall') {
+        final groupCall = json['group_call'] as Map<String, dynamic>?;
+        if (groupCall != null) {
+          _groupCallController.add(groupCall);
+        }
+      } else if (type == 'updateSecretChat') {
+        final secretChat = json['secret_chat'] as Map<String, dynamic>?;
+        if (secretChat != null) {
+          _secretChatController.add(secretChat);
+        }
+      } else if (type == 'callbackQueryAnswer') {
+        _botCallbackController.add(json);
+      } else if (type == 'messages') {
+        // Scheduled messages response
+        final msgs = json['messages'] as List<dynamic>? ?? [];
+        final scheduled = <TelegramMessage>[];
+        for (final m in msgs) {
+          if (m is Map<String, dynamic>) {
+            final msg = _convertRawToTelegramMessage(m);
+            if (msg != null) scheduled.add(msg);
+          }
+        }
+        _scheduledMessagesController.add(scheduled);
       } else if (type == 'updateChatAction') {
         final chatId = json['chat_id'] as int?;
         final senderJson = json['sender_id'] as Map<String, dynamic>?;
@@ -712,7 +737,7 @@ class TelegramService {
         final message = json['message'] as String?;
         _debugPrint('TDLib error $code: $message');
       }
-    } catch (e, stack) {
+    } catch (e) {
       _debugPrint('Raw JSON error: $e');
     }
   }
@@ -774,7 +799,7 @@ class TelegramService {
         final chat = _chatsCache[update.chatId];
         if (chat != null) {
           // Update positions if provided
-          for (final pos in update.positions) {
+          for (final _ in update.positions) {
             // TDLib handles position updates internally
           }
         }
@@ -3177,24 +3202,20 @@ class TelegramService {
   List<Map<String, dynamic>> _activeSessions = [];
   List<Map<String, dynamic>> get activeSessions => _activeSessions;
 
-  /// Get all active sessions
   Future<void> getActiveSessions() async {
     if (_clientId == 0) return;
     tdSend(_clientId, const GetActiveSessions());
   }
 
-  /// Terminate a specific session
   Future<void> terminateSession(int sessionId) async {
     if (_clientId == 0) return;
     tdSend(_clientId, TerminateSession(sessionId: sessionId));
-    // Refresh sessions list after terminating
     Future.delayed(
       const Duration(milliseconds: 500),
       () => getActiveSessions(),
     );
   }
 
-  /// Terminate all other sessions
   Future<void> terminateAllOtherSessions() async {
     if (_clientId == 0) return;
     tdSend(_clientId, const TerminateAllOtherSessions());
@@ -3211,13 +3232,11 @@ class TelegramService {
   int _accountTtlDays = 365;
   int get accountTtlDays => _accountTtlDays;
 
-  /// Get account self-destruct timer
   Future<void> getAccountTtl() async {
     if (_clientId == 0) return;
     tdSend(_clientId, const GetAccountTtl());
   }
 
-  /// Set account self-destruct timer (in days)
   Future<void> setAccountTtl(int days) async {
     if (_clientId == 0) return;
     tdSend(_clientId, SetAccountTtl(ttl: AccountTtl(days: days)));
@@ -3235,7 +3254,6 @@ class TelegramService {
   Map<String, String> get privacySettings => Map.unmodifiable(_privacySettings);
   String? _pendingPrivacySetting;
 
-  /// Get privacy setting rules for a specific setting
   Future<void> getPrivacySettingRules(String settingType) async {
     if (_clientId == 0) return;
     UserPrivacySetting setting;
@@ -3265,7 +3283,6 @@ class TelegramService {
     tdSend(_clientId, GetUserPrivacySettingRules(setting: setting));
   }
 
-  /// Set privacy setting rules
   Future<void> setPrivacySettingRules(
     String settingType,
     String ruleType,
@@ -3321,7 +3338,6 @@ class TelegramService {
     _privacySettingsController.add(_privacySettings);
   }
 
-  /// Load all privacy settings at once
   Future<void> loadAllPrivacySettings() async {
     for (final s in [
       'phone',
@@ -4147,8 +4163,7 @@ class TelegramService {
 
   /// Cache for archived chats
   final Map<int, Chat> _archivedChatsCache = {};
-  final Map<int, Map<String, dynamic>> _rawArchivedChatData = {};
-  List<int> _archivedChatIds = [];
+  final List<int> _archivedChatIds = [];
 
   /// Stream for archived chats
   final _archivedChatsController =
@@ -4224,10 +4239,6 @@ class TelegramService {
   /// Toggle hide archived chats setting (local only)
   void setHideArchivedChats(bool hide) {
     _hideArchivedChats = hide;
-    _archivedChatsController.add(archivedChats);
-  }
-
-  void _emitArchivedChats() {
     _archivedChatsController.add(archivedChats);
   }
 
@@ -4623,54 +4634,8 @@ class TelegramService {
     await searchMessages(query: query, limit: limit);
   }
 
-  /// Handle search messages response
-  void _handleSearchMessagesResult(FoundMessages result) {
-    final messages = <SearchResultMessage>[];
-
-    for (final msg in result.messages) {
-      final converted = _convertMessageToSearchResult(msg);
-      if (converted != null) {
-        messages.add(converted);
-      }
-    }
-
-    _lastSearchResults = SearchResults(
-      messages: messages,
-      totalCount: result.totalCount,
-      nextOffset: result.nextOffset,
-    );
-
-    _searchResultsController.add(_lastSearchResults!);
-    _debugPrint(
-      'Search returned ${messages.length} messages (total: ${result.totalCount})',
-    );
-  }
-
-  /// Handle chat messages search response
-  void _handleChatMessagesSearchResult(int chatId, FoundChatMessages result) {
-    final messages = <SearchResultMessage>[];
-
-    for (final msg in result.messages) {
-      final converted = _convertMessageToSearchResult(msg);
-      if (converted != null) {
-        messages.add(converted);
-      }
-    }
-
-    _lastSearchResults = SearchResults(
-      messages: messages,
-      totalCount: result.totalCount,
-      nextFromMessageId: result.nextFromMessageId,
-      chatId: chatId,
-    );
-
-    _searchResultsController.add(_lastSearchResults!);
-    _debugPrint(
-      'Chat search returned ${messages.length} messages in chat $chatId',
-    );
-  }
-
   /// Convert TDLib message to search result
+  // ignore: unused_element
   SearchResultMessage? _convertMessageToSearchResult(Message msg) {
     try {
       final content = msg.content;
@@ -4781,6 +4746,659 @@ class TelegramService {
   static final searchFilterLinks = SearchMessagesFilterUrl();
   static final searchFilterMentions = SearchMessagesFilterMention();
   static final searchFilterUnread = SearchMessagesFilterUnreadMention();
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // POLLS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Send a poll to a chat
+  Future<void> sendPoll(
+    int chatId, {
+    required String question,
+    required List<String> options,
+    bool isAnonymous = true,
+    bool allowMultipleAnswers = false,
+    bool isQuiz = false,
+    int? correctOptionId,
+    String? explanation,
+    int? replyToMessageId,
+    int? schedulingTimestamp,
+  }) async {
+    if (_clientId == 0) return;
+
+    final pollType = isQuiz
+        ? PollTypeQuiz(
+            correctOptionId: correctOptionId ?? 0,
+            explanation: explanation != null
+                ? FormattedText(text: explanation, entities: [])
+                : FormattedText(text: '', entities: []),
+          )
+        : PollTypeRegular(allowMultipleAnswers: allowMultipleAnswers);
+
+    tdSend(
+      _clientId,
+      SendMessage(
+        chatId: chatId,
+        messageThreadId: 0,
+        replyTo: replyToMessageId != null
+            ? MessageReplyToMessage(messageId: replyToMessageId, chatId: chatId)
+            : null,
+        options: schedulingTimestamp != null
+            ? MessageSendOptions(
+                disableNotification: false,
+                fromBackground: false,
+                protectContent: false,
+                updateOrderOfInstalledStickerSets: false,
+                schedulingState: MessageSchedulingStateSendAtDate(
+                  sendDate: schedulingTimestamp,
+                ),
+                sendingId: 0,
+              )
+            : null,
+        inputMessageContent: InputMessagePoll(
+          question: question,
+          options: options,
+          isAnonymous: isAnonymous,
+          type: pollType,
+          openPeriod: 0,
+          closeDate: 0,
+          isClosed: false,
+        ),
+      ),
+    );
+  }
+
+  /// Vote on a poll
+  Future<void> setPollAnswer(
+    int chatId,
+    int messageId,
+    List<int> optionIds,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetPollAnswer(chatId: chatId, messageId: messageId, optionIds: optionIds),
+    );
+  }
+
+  /// Retract vote from a poll
+  Future<void> retractPollVote(int chatId, int messageId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SetPollAnswer(chatId: chatId, messageId: messageId, optionIds: []),
+    );
+  }
+
+  /// Stop a poll (owner only)
+  Future<void> stopPoll(int chatId, int messageId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      StopPoll(chatId: chatId, messageId: messageId, replyMarkup: null),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCHEDULED MESSAGES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _scheduledMessagesController =
+      StreamController<List<TelegramMessage>>.broadcast();
+  Stream<List<TelegramMessage>> get scheduledMessagesStream =>
+      _scheduledMessagesController.stream;
+
+  /// Load scheduled messages for a chat
+  Future<void> loadScheduledMessages(int chatId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, GetChatScheduledMessages(chatId: chatId));
+  }
+
+  /// Send a scheduled message (text)
+  Future<void> sendScheduledMessage(
+    int chatId,
+    String text, {
+    required int scheduledDate,
+    int? replyToMessageId,
+  }) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendMessage(
+        chatId: chatId,
+        messageThreadId: 0,
+        replyTo: replyToMessageId != null
+            ? MessageReplyToMessage(messageId: replyToMessageId, chatId: chatId)
+            : null,
+        options: MessageSendOptions(
+          disableNotification: false,
+          fromBackground: false,
+          protectContent: false,
+          updateOrderOfInstalledStickerSets: false,
+          schedulingState: MessageSchedulingStateSendAtDate(
+            sendDate: scheduledDate,
+          ),
+          sendingId: 0,
+        ),
+        inputMessageContent: InputMessageText(
+          text: FormattedText(text: text, entities: []),
+          disableWebPagePreview: false,
+          clearDraft: true,
+        ),
+      ),
+    );
+  }
+
+  /// Edit a scheduled message's date
+  Future<void> editScheduledMessageDate(
+    int chatId,
+    int messageId,
+    int newDate,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      EditMessageSchedulingState(
+        chatId: chatId,
+        messageId: messageId,
+        schedulingState: MessageSchedulingStateSendAtDate(sendDate: newDate),
+      ),
+    );
+  }
+
+  /// Delete scheduled messages
+  Future<void> deleteScheduledMessages(int chatId, List<int> messageIds) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      DeleteMessages(chatId: chatId, messageIds: messageIds, revoke: true),
+    );
+  }
+
+  /// Send scheduled messages immediately
+  Future<void> sendScheduledMessagesNow(
+    int chatId,
+    List<int> messageIds,
+  ) async {
+    if (_clientId == 0) return;
+    for (final messageId in messageIds) {
+      tdSend(
+        _clientId,
+        EditMessageSchedulingState(
+          chatId: chatId,
+          messageId: messageId,
+          schedulingState: null,
+        ),
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SAVED MESSAGES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Get the saved messages chat id (it's the user's own id)
+  int get savedMessagesChatId => _currentUserId ?? 0;
+
+  /// Open saved messages chat
+  Future<int?> openSavedMessages() async {
+    if (_currentUserId == null) return null;
+    // Saved messages is just a private chat with yourself
+    return _currentUserId;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SECRET CHATS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _secretChatController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get secretChatStream =>
+      _secretChatController.stream;
+
+  /// Create a new secret chat with a user
+  Future<void> createSecretChat(int userId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, CreateSecretChat(secretChatId: 0));
+    // First create the secret chat object
+    tdSend(_clientId, CreateNewSecretChat(userId: userId));
+  }
+
+  /// Close a secret chat
+  Future<void> closeSecretChat(int secretChatId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, CloseSecretChat(secretChatId: secretChatId));
+  }
+
+  /// Set self-destruct timer for secret chats
+  Future<void> setSecretChatTtl(int chatId, int ttl) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendMessage(
+        chatId: chatId,
+        messageThreadId: 0,
+        replyTo: null,
+        options: null,
+        inputMessageContent: InputMessageText(
+          text: FormattedText(text: '', entities: []),
+          disableWebPagePreview: false,
+          clearDraft: false,
+        ),
+      ),
+    );
+    // Set chat message auto-delete time
+    tdSend(
+      _clientId,
+      SetChatMessageAutoDeleteTime(chatId: chatId, messageAutoDeleteTime: ttl),
+    );
+  }
+
+  /// Get secret chat info
+  Future<void> getSecretChatInfo(int secretChatId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, GetSecretChat(secretChatId: secretChatId));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VOICE / VIDEO CALLS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _callStateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get callStateStream =>
+      _callStateController.stream;
+
+  /// Start a voice call
+  Future<void> startCall(int userId, {bool isVideo = false}) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      CreateCall(
+        userId: userId,
+        protocol: CallProtocol(
+          udpP2p: true,
+          udpReflector: true,
+          minLayer: 65,
+          maxLayer: 65,
+          libraryVersions: ['4.0.0'],
+        ),
+        isVideo: isVideo,
+      ),
+    );
+  }
+
+  /// Accept an incoming call
+  Future<void> acceptCall(int callId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      AcceptCall(
+        callId: callId,
+        protocol: CallProtocol(
+          udpP2p: true,
+          udpReflector: true,
+          minLayer: 65,
+          maxLayer: 65,
+          libraryVersions: ['4.0.0'],
+        ),
+      ),
+    );
+  }
+
+  /// End / discard a call
+  Future<void> discardCall(int callId, {bool isDisconnected = false}) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      DiscardCall(
+        callId: callId,
+        isDisconnected: isDisconnected,
+        duration: 0,
+        isVideo: false,
+        connectionId: 0,
+      ),
+    );
+  }
+
+  /// Rate a call after it ends
+  Future<void> rateCall(int callId, int rating, {String comment = ''}) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendCallRating(
+        callId: callId,
+        rating: rating,
+        comment: comment,
+        problems: [],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GROUP CALLS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _groupCallController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get groupCallStream =>
+      _groupCallController.stream;
+
+  /// Create a voice chat (group call) in a chat
+  Future<void> createGroupCall(int chatId, {String title = ''}) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      CreateVideoChat(
+        chatId: chatId,
+        title: title,
+        startDate: 0,
+        isRtmpStream: false,
+      ),
+    );
+  }
+
+  /// Join a group call
+  Future<void> joinGroupCall(int groupCallId) async {
+    if (_clientId == 0) return;
+    // Note: actual joining requires audio/video source negotiation
+    // This sends the join request to TDLib
+    tdSend(_clientId, GetGroupCall(groupCallId: groupCallId));
+  }
+
+  /// Leave a group call
+  Future<void> leaveGroupCall(int groupCallId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, LeaveGroupCall(groupCallId: groupCallId));
+  }
+
+  /// End a group call
+  Future<void> endGroupCall(int groupCallId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, EndGroupCall(groupCallId: groupCallId));
+  }
+
+  /// Toggle mute in a group call
+  Future<void> toggleGroupCallParticipantMute(
+    int groupCallId,
+    int participantId,
+    bool isMuted,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      ToggleGroupCallParticipantIsMuted(
+        groupCallId: groupCallId,
+        participantId: MessageSenderUser(userId: participantId),
+        isMuted: isMuted,
+      ),
+    );
+  }
+
+  /// Invite users to a group call
+  Future<void> inviteGroupCallParticipants(
+    int groupCallId,
+    List<int> userIds,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      InviteGroupCallParticipants(groupCallId: groupCallId, userIds: userIds),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STORIES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _storiesController =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  Stream<List<Map<String, dynamic>>> get storiesStream =>
+      _storiesController.stream;
+
+  final _activeStoriesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get activeStoriesStream =>
+      _activeStoriesController.stream;
+
+  /// Load chat active stories (contacts who posted stories)
+  Future<void> loadActiveStories() async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, GetChatActiveStories(chatId: 0));
+  }
+
+  /// Open a story to view it
+  Future<void> openStory(int storySenderChatId, int storyId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      OpenStory(storySenderChatId: storySenderChatId, storyId: storyId),
+    );
+  }
+
+  /// Close a story
+  Future<void> closeStory(int storySenderChatId, int storyId) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      CloseStory(storySenderChatId: storySenderChatId, storyId: storyId),
+    );
+  }
+
+  /// Send a photo story
+  Future<void> sendPhotoStory(
+    String photoPath, {
+    String caption = '',
+    int? privacyRulesType, // 0=everyone, 1=contacts, 2=close friends
+  }) async {
+    if (_clientId == 0) return;
+    final privacy = _getStoryPrivacySettings(privacyRulesType ?? 0);
+    tdSend(
+      _clientId,
+      SendStory(
+        content: InputStoryContentPhoto(
+          photo: InputFileLocal(path: photoPath),
+          addedStickerFileIds: [],
+        ),
+        caption: FormattedText(text: caption, entities: []),
+        privacySettings: privacy,
+        activePeriod: 86400, // 24 hours
+        isPinned: false,
+        protectContent: false,
+      ),
+    );
+  }
+
+  /// Send a video story
+  Future<void> sendVideoStory(
+    String videoPath, {
+    String caption = '',
+    double? duration,
+    int? privacyRulesType,
+  }) async {
+    if (_clientId == 0) return;
+    final privacy = _getStoryPrivacySettings(privacyRulesType ?? 0);
+    tdSend(
+      _clientId,
+      SendStory(
+        content: InputStoryContentVideo(
+          video: InputFileLocal(path: videoPath),
+          addedStickerFileIds: [],
+          duration: duration ?? 0,
+          isAnimation: false,
+        ),
+        caption: FormattedText(text: caption, entities: []),
+        privacySettings: privacy,
+        activePeriod: 86400,
+        isPinned: false,
+        protectContent: false,
+      ),
+    );
+  }
+
+  /// Delete a story
+  Future<void> deleteStory(int storyId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, DeleteStory(storyId: storyId));
+  }
+
+  /// React to a story (not available in this TDLib version)
+  // ignore: unused_element
+  Future<void> setStoryReaction(
+    int storySenderChatId,
+    int storyId,
+    String emoji,
+  ) async {
+    // Story reactions are not supported in TDLib 1.6.0
+    _debugPrint('Story reactions not supported in this TDLib version');
+  }
+
+  StoryPrivacySettings _getStoryPrivacySettings(int type) {
+    switch (type) {
+      case 1:
+        return StoryPrivacySettingsContacts(exceptUserIds: []);
+      case 2:
+        return StoryPrivacySettingsCloseFriends();
+      default:
+        return const StoryPrivacySettingsEveryone();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BOT INTERACTION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  final _botCallbackController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get botCallbackStream =>
+      _botCallbackController.stream;
+
+  /// Send a bot command (e.g. /start)
+  Future<void> sendBotCommand(
+    int chatId,
+    String command, {
+    int? botUserId,
+  }) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendMessage(
+        chatId: chatId,
+        messageThreadId: 0,
+        replyTo: null,
+        options: null,
+        inputMessageContent: InputMessageText(
+          text: FormattedText(
+            text: command.startsWith('/') ? command : '/$command',
+            entities: [],
+          ),
+          disableWebPagePreview: false,
+          clearDraft: true,
+        ),
+      ),
+    );
+  }
+
+  /// Get bot commands for a chat
+  Future<void> getBotCommands(int botUserId) async {
+    if (_clientId == 0) return;
+    tdSend(_clientId, GetUserFullInfo(userId: botUserId));
+  }
+
+  /// Answer a bot inline keyboard callback
+  Future<void> answerCallbackQuery(
+    int chatId,
+    int messageId,
+    String data,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      GetCallbackQueryAnswer(
+        chatId: chatId,
+        messageId: messageId,
+        payload: CallbackQueryPayloadData(data: data),
+      ),
+    );
+  }
+
+  /// Get inline query results from a bot
+  Future<void> getInlineQueryResults(
+    int botUserId,
+    String query,
+    String offset,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      GetInlineQueryResults(
+        botUserId: botUserId,
+        chatId: 0,
+        userLocation: null,
+        query: query,
+        offset: offset,
+      ),
+    );
+  }
+
+  /// Send an inline query result
+  Future<void> sendInlineQueryResult(
+    int chatId,
+    int queryId,
+    String resultId,
+  ) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      SendInlineQueryResultMessage(
+        chatId: chatId,
+        messageThreadId: 0,
+        replyTo: null,
+        options: null,
+        queryId: queryId,
+        resultId: resultId,
+        hideViaBot: false,
+      ),
+    );
+  }
+
+  /// Open a bot's web app / mini app
+  Future<void> openBotWebApp(int chatId, int botUserId, String url) async {
+    if (_clientId == 0) return;
+    tdSend(
+      _clientId,
+      OpenWebApp(
+        chatId: chatId,
+        botUserId: botUserId,
+        url: url,
+        theme: null,
+        applicationName: 'TelegramFlutter',
+        messageThreadId: 0,
+        replyTo: null,
+      ),
+    );
+  }
+
+  /// Check if a user is a bot
+  bool isBot(int userId) {
+    final user = _usersCache[userId];
+    return user?.type is UserTypeBot;
+  }
+
+  /// Get bot info from user cache
+  Map<String, dynamic>? getBotInfo(int userId) {
+    final user = _usersCache[userId];
+    if (user == null || user.type is! UserTypeBot) return null;
+    final bot = user.type as UserTypeBot;
+    return {
+      'canJoinGroups': bot.canJoinGroups,
+      'canReadAllGroupMessages': bot.canReadAllGroupMessages,
+      'isInline': bot.isInline,
+      'inlineQueryPlaceholder': bot.inlineQueryPlaceholder,
+      'needLocation': bot.needLocation,
+      'canBeAddedToAttachmentMenu': bot.canBeAddedToAttachmentMenu,
+    };
+  }
 }
 
 /// Search results container
@@ -4871,7 +5489,7 @@ class TelegramChatFolder {
     return TelegramChatFolder(
       id: info.id,
       title: info.title,
-      iconName: info.icon?.name,
+      iconName: info.icon.name,
       isShareable: info.isShareable,
     );
   }
